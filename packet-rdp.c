@@ -1025,7 +1025,7 @@ static const value_string input_mouse_event_buttons [] = {
 };
 
 
-static void
+static gint32
 dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
     guint8 event_header;
@@ -1041,13 +1041,13 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
     guint16 wheel_rotation;
 
     guint8 event_size;
-    guint8 event_detail[20] = {'\0'};
+    guint8 event_detail[128] = {'\0'};
     guint32 bytes_remaining;
 
 #define GET_MOUSE_POS_FLAGS \
     pointer_flags = tvb_get_letohs(tvb, offset + 1);\
     x_pos = tvb_get_letohs(tvb, offset + 3);\
-    y_pos = tvb_get_letohs(tvb, offset + 5);\
+    y_pos = tvb_get_letohs(tvb, offset + 5);
 
     bytes_remaining = tvb_length_remaining(tvb, offset);
 
@@ -1123,7 +1123,7 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
             default:
                 // never reach here
                 event_size = bytes_remaining;
-                g_snprintf(event_detail, sizeof(event_detail), "Error");
+                g_snprintf(event_detail, sizeof(event_detail), "Error!");
         }
 
         ti = proto_tree_add_item(tree, hf_ts_input_event, tvb, offset, event_size, TRUE);
@@ -1132,6 +1132,8 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
         offset += event_size;
         bytes_remaining = tvb_length_remaining(tvb, offset);
     }
+
+    return 0;
 }
 
 
@@ -1163,7 +1165,8 @@ dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 				offset += 4;
 				dissect_x224(tvb, pinfo, tree);
 			}
-            else if ((version & 0x03) == FASTPATH_INPUT_ACTION_FASTPATH)// TODO: 低2位为0 FASTINPUT
+            else if ((version & 0x03) == FASTPATH_INPUT_ACTION_FASTPATH && 
+                    conversation_data(pinfo)->server_port == pinfo->destport)// packet only client -> server
             {
                 num_events = (version >> 2) & 0x0F;
                 sec_flags = version >> 6;
@@ -1177,16 +1180,18 @@ dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 				ti = proto_tree_add_item(tree, hf_client_fastinput_event_pdu, tvb, 0, bytes, FALSE);
                 ts_input_events_tree = proto_item_add_subtree(ti, ett_ts_input_events);
 
-                if (sec_flags)
+                if (sec_flags & FASTPATH_INPUT_ENCRYPTED) // why not encrypted, but set FASTPATH_INPUT_SECURE_CHECKSUM
                 {
                     // TODO: FIPS 
                 }
                 else
                 {
                     if (num_events == 0)
+                    {
                         num_events = tvb_get_guint8(tvb, offset++);
+                    }
 
-                    dissect_fp_input_events(tvb, pinfo, tree);
+                    dissect_fp_input_events(tvb, pinfo, ts_input_events_tree);
                 }
 
 				proto_item_set_text(ti, "Client Fast-Path Input Event PDU, Length = %d, Events = %d, %s", (int)length, (int)num_events, val_to_str(sec_flags, fast_path_input_event_security, ""));
@@ -1265,7 +1270,7 @@ proto_register_ts_input_events(void)
 	static hf_register_info hf[] =
 	{
 		{ &hf_ts_input_event,
-		  { "inputEvent", "rdp.input_event", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "inputEvent", "rdp.input_event", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
 	};
 
 	static gint *ett[] = {
