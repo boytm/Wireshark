@@ -56,6 +56,9 @@ static int hf_ts_security_header = -1;
 static int hf_ts_share_control_header = -1;
 static int hf_ts_share_data_header = -1;
 static int hf_client_fastinput_event_pdu = -1;
+static int hf_client_fastpath_input_events = -1;
+static int hf_server_fastpath_output_pdu = -1;
+static int hf_server_fastpath_outputs = -1;
 
 static int hf_ts_confirm_active_pdu = -1;
 static int hf_ts_confirm_active_pdu_shareid = -1;
@@ -80,6 +83,7 @@ static int hf_ts_server_public_key_exponent = -1;
 static int hf_ts_server_proprietary_certificate_signature = -1;
 
 static int hf_ts_input_event = -1;
+static int hf_ts_output_update = -1;
 
 static int hf_ts_capability_sets = -1;
 
@@ -95,6 +99,7 @@ static gint ett_ts_caps_set = -1;
 static gint ett_mcs_connect_response_pdu = -1;
 static gint ett_ts_server_secutiry_data = -1;
 static gint ett_ts_input_events = -1;
+static gint ett_ts_output_updates = -1;
 
 #define SEC_EXCHANGE_PKT			0x0001
 #define SEC_ENCRYPT				0x0008
@@ -1136,6 +1141,123 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
     return 0;
 }
 
+#define FASTPATH_UPDATETYPE_ORDERS 0x0 
+#define FASTPATH_UPDATETYPE_BITMAP 0x1 
+#define FASTPATH_UPDATETYPE_PALETTE 0x2 
+#define FASTPATH_UPDATETYPE_SYNCHRONIZE 0x3 
+#define FASTPATH_UPDATETYPE_SURFCMDS 0x4 
+#define FASTPATH_UPDATETYPE_PTR_NULL 0x5 
+#define FASTPATH_UPDATETYPE_PTR_DEFAULT 0x6 
+#define FASTPATH_UPDATETYPE_PTR_POSITION 0x8 
+#define FASTPATH_UPDATETYPE_COLOR 0x9 
+#define FASTPATH_UPDATETYPE_CACHED 0xA 
+#define FASTPATH_UPDATETYPE_POINTER 0xB 
+
+#define FASTPATH_FRAGMENT_SINGLE 0x0 
+#define FASTPATH_FRAGMENT_LAST 0x1 
+#define FASTPATH_FRAGMENT_FIRST 0x2 
+#define FASTPATH_FRAGMENT_NEXT 0x3 
+
+#define FASTPATH_OUTPUT_COMPRESSION_USED 0x2 
+
+#define CompressionTypeMask 0x0F 
+#define PACKET_COMPRESSED 0x20 
+#define PACKET_AT_FRONT 0x40 
+#define PACKET_FLUSHED 0x80 
+
+#define PACKET_COMPR_TYPE_8K 0x0 
+#define PACKET_COMPR_TYPE_64K 0x1 
+#define PACKET_COMPR_TYPE_RDP6 0x2 
+#define PACKET_COMPR_TYPE_RDP61 0x3 
+
+static const value_string fast_path_output_update_types [] = {
+    { FASTPATH_UPDATETYPE_ORDERS, "Orders Update" },  
+    { FASTPATH_UPDATETYPE_BITMAP, "Bitmap Update" },  
+    { FASTPATH_UPDATETYPE_PALETTE, "Palette Update" },  
+    { FASTPATH_UPDATETYPE_SYNCHRONIZE, "Synchronize Update" },  
+    { FASTPATH_UPDATETYPE_SURFCMDS, "Surface Commands Update" }, 
+    { FASTPATH_UPDATETYPE_PTR_NULL, "System Pointer Hidden Update" },  
+    { FASTPATH_UPDATETYPE_PTR_DEFAULT, "System Pointer Default Update" },  
+    { FASTPATH_UPDATETYPE_PTR_POSITION, "Pointer Position Update" },  
+    { FASTPATH_UPDATETYPE_COLOR, "Color Pointer Update" },  
+    { FASTPATH_UPDATETYPE_CACHED, "Cached Pointer Update" },
+    { FASTPATH_UPDATETYPE_POINTER, "New Pointer Update" },
+    { 0x0,	NULL }
+};
+
+static const value_string fast_path_fragment_types [] = {
+    { FASTPATH_FRAGMENT_SINGLE, "Single" }, 
+    { FASTPATH_FRAGMENT_LAST, "Last" }, 
+    { FASTPATH_FRAGMENT_FIRST, "First" }, 
+    { FASTPATH_FRAGMENT_NEXT, "Next" }, 
+    { 0x0,	NULL }
+};
+
+static const value_string rdp_compress_types [] = {
+    { PACKET_COMPR_TYPE_8K, "RDP 4.0 bulk compression" },
+    { PACKET_COMPR_TYPE_64K, "RDP 5.0 bulk compression" },
+    { PACKET_COMPR_TYPE_RDP6, "RDP 6.0 bulk compression" },
+    { PACKET_COMPR_TYPE_RDP61, "RDP 6.1 bulk compression" },
+    { 0x0,	NULL }
+};
+
+
+
+
+static gint32
+dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    guint8 update_header;
+    guint8 compression_flgas;
+    guint16 size;
+
+    guint8 update_code;
+    guint8 fragmentation;
+    guint8 compression;
+
+    proto_item *ti;
+    guint8 update_detail[128] = {'\0'};
+    guint32 bytes_remaining;
+    guint32 update_header_offset;
+
+    bytes_remaining = tvb_length_remaining(tvb, offset);
+
+    while(bytes_remaining > 0)
+    {
+        // reset
+        memset(update_detail, 0, sizeof(update_detail));
+        update_header_offset = offset;
+
+        update_header = tvb_get_guint8(tvb, offset++);
+        update_code = update_header & 0x0F;
+        fragmentation = (update_header >> 4) & 0x3;
+        compression = (update_header >> 6) & 0x3;
+
+        if (compression == FASTPATH_OUTPUT_COMPRESSION_USED)
+        {
+            compression_flgas = tvb_get_guint8(tvb, offset++);
+
+            g_snprintf(update_detail, sizeof(update_detail), "%s",
+                    val_to_str(compression_flgas & CompressionTypeMask, rdp_compress_types, "Unknown %d"));
+        }
+
+        size = tvb_get_letohs(tvb, offset);
+        offset += 2;
+
+
+        ti = proto_tree_add_item(tree, hf_ts_output_update, tvb, update_header_offset, offset - update_header_offset + size, TRUE);
+        proto_item_set_text(ti, "%s, Fragment %s, %s", 
+                val_to_str(update_code, fast_path_output_update_types, "Unknown %d"), 
+                val_to_str(fragmentation, fast_path_fragment_types, "Unknown %d"),
+                update_detail);
+
+        offset += size;
+        bytes_remaining = tvb_length_remaining(tvb, offset);
+    }
+
+    return 0;
+}
+
 
 static void
 dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
@@ -1145,7 +1267,10 @@ dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
     guint8 num_events;
     guint8 sec_flags;
 
+    gboolean is_input;
+
     proto_tree *ts_input_events_tree;
+    proto_tree *ts_output_updates_tree;
 
 	if (tree)
 	{
@@ -1165,38 +1290,61 @@ dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 				offset += 4;
 				dissect_x224(tvb, pinfo, tree);
 			}
-            else if ((version & 0x03) == FASTPATH_INPUT_ACTION_FASTPATH && 
-                    conversation_data(pinfo)->server_port == pinfo->destport)// packet only client -> server
+            else if ((version & 0x03) == FASTPATH_INPUT_ACTION_FASTPATH )
             {
+                is_input = conversation_data(pinfo)->server_port == pinfo->destport; 
                 num_events = (version >> 2) & 0x0F;
                 sec_flags = version >> 6;
 
                 ++offset;
                 length = parse_per_length(tvb);
 
-                if(length != bytes) // if numEvents == 0, then after fips dataSignature
+                if(length != bytes) 
                     return;
 
-				ti = proto_tree_add_item(tree, hf_client_fastinput_event_pdu, tvb, 0, bytes, FALSE);
-                ts_input_events_tree = proto_item_add_subtree(ti, ett_ts_input_events);
 
                 if (sec_flags & FASTPATH_INPUT_ENCRYPTED) // why not encrypted, but set FASTPATH_INPUT_SECURE_CHECKSUM
                 {
-                    // TODO: FIPS 
+                    offset += 4;
+                    if (sec_flags & FASTPATH_INPUT_SECURE_CHECKSUM)
+                        offset += 8;
+                    // TODO: FIPS decrypt
                 }
                 else
                 {
-                    if (num_events == 0)
+                    if (is_input)// packet only client -> server
                     {
-                        num_events = tvb_get_guint8(tvb, offset++);
-                    }
+                        if (num_events == 0)// if numEvents == 0, then after fips dataSignature
+                        {
+                            num_events = tvb_get_guint8(tvb, offset++);
+                        }
 
-                    dissect_fp_input_events(tvb, pinfo, ts_input_events_tree);
+                        ti = proto_tree_add_item(tree, hf_client_fastinput_event_pdu, tvb, 0, offset, FALSE);
+                        proto_item_set_text(ti, "Client Fast-Path Input Event PDU, Length = %d, Events = %d, %s", (int)length, (int)num_events, val_to_str(sec_flags, fast_path_input_event_security, ""));
+
+                        ti = proto_tree_add_item(tree, hf_client_fastpath_input_events, tvb, offset, -1, FALSE);
+                        ts_input_events_tree = proto_item_add_subtree(ti, ett_ts_input_events);
+
+                        dissect_fp_input_events(tvb, pinfo, ts_input_events_tree);
+
+                        col_clear(pinfo->cinfo, COL_INFO);
+                        col_add_str(pinfo->cinfo, COL_INFO, "Client Fast-Path Input Event PDU");
+                    }
+                    else
+                    {
+                        ti = proto_tree_add_item(tree, hf_server_fastpath_output_pdu, tvb, 0, offset, FALSE);
+                        proto_item_set_text(ti, "Server Fast-Path Output Update PDU, Length = %d, %s", (int)length, val_to_str(sec_flags, fast_path_input_event_security, ""));
+
+                        ti = proto_tree_add_item(tree, hf_server_fastpath_outputs, tvb, offset, -1, FALSE);
+                        ts_output_updates_tree = proto_item_add_subtree(ti, ett_ts_output_updates);
+
+                        dissect_fp_updates(tvb, pinfo, ts_output_updates_tree);
+
+                        col_clear(pinfo->cinfo, COL_INFO);
+                        col_add_str(pinfo->cinfo, COL_INFO, "Server Fast-Path Update PDU");
+                    }
                 }
 
-				proto_item_set_text(ti, "Client Fast-Path Input Event PDU, Length = %d, Events = %d, %s", (int)length, (int)num_events, val_to_str(sec_flags, fast_path_input_event_security, ""));
-				col_clear(pinfo->cinfo, COL_INFO);
-				col_add_str(pinfo->cinfo, COL_INFO, "Client Fast-Path Input Event PDU");
             }
 		}
 	}
@@ -1282,6 +1430,23 @@ proto_register_ts_input_events(void)
 }
 
 void
+proto_register_ts_output_updates(void)
+{
+	static hf_register_info hf[] =
+	{
+		{ &hf_ts_output_update,
+		  { "outputUpdate", "rdp.input_event", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+	};
+
+	static gint *ett[] = {
+		&ett_ts_output_updates
+	};
+
+	proto_register_field_array(proto_rdp, hf, array_length(hf));
+	proto_register_subtree_array(ett, array_length(ett));
+}
+
+void
 proto_register_ts_server_security_data(void)
 {
 	static hf_register_info hf[] =
@@ -1317,7 +1482,7 @@ proto_register_mcs_connect_response_pdu(void)
 		{ &hf_mcs_connect_response_pdu_server_network_data,
 		  { "serverNetworkData", "rdp.server_network", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_mcs_connect_response_pdu_server_security_data,
-		  { "serverSecurityData", "rdp.server_security", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		  { "serverSecurityData", "rdp.server_security", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_mcs_connect_response_pdu_server_message_channel_data,
 		  { "serverMessageChannelData", "rdp.server_message_channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_mcs_connect_response_pdu_server_multitransport_channel_data,
@@ -1390,7 +1555,13 @@ proto_register_rdp(void)
 		{ &hf_mcs_connect_response_pdu,
 		  { "MCS Connect Response PDU", "rdp.connect_response", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_client_fastinput_event_pdu,
-		  { "Client Fast-Path Input Event PDU", "rdp.fastinput", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "Client Fast-Path Input Event PDU", "rdp.fp_input", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_client_fastpath_input_events,
+		  { "fpInputEvents", "rdp.fp_input_events", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_server_fastpath_output_pdu,
+		  { "Server Fast-Path Update PDU", "rdp.fp_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_server_fastpath_outputs,
+		  { "fpOutputUpdates", "rdp.fp_output_updates", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
 	};
 
 	static gint *ett[] = {
@@ -1405,6 +1576,7 @@ proto_register_rdp(void)
     proto_register_mcs_connect_response_pdu();
     proto_register_ts_server_security_data();
     proto_register_ts_input_events();
+    proto_register_ts_output_updates();
 	module_rdp = prefs_register_protocol( proto_rdp, proto_reg_handoff_rdp);
 }
 
