@@ -52,6 +52,7 @@ static int hf_rdp_rdp = -1;
 static int hf_rdp_tpkt = -1;
 static int hf_rdp_x224 = -1;
 static int hf_rdp_mcs = -1;
+static int hf_rdp_channel = -1;
 static int hf_ts_security_header = -1;
 static int hf_ts_share_control_header = -1;
 static int hf_ts_share_data_header = -1;
@@ -238,6 +239,35 @@ static gint ett_ts_output_updates = -1;
 #define FASTPATH_INPUT_SECURE_CHECKSUM 0x1 
 #define FASTPATH_INPUT_ENCRYPTED 0x2 
 
+#define FASTPATH_UPDATETYPE_ORDERS 0x0 
+#define FASTPATH_UPDATETYPE_BITMAP 0x1 
+#define FASTPATH_UPDATETYPE_PALETTE 0x2 
+#define FASTPATH_UPDATETYPE_SYNCHRONIZE 0x3 
+#define FASTPATH_UPDATETYPE_SURFCMDS 0x4 
+#define FASTPATH_UPDATETYPE_PTR_NULL 0x5 
+#define FASTPATH_UPDATETYPE_PTR_DEFAULT 0x6 
+#define FASTPATH_UPDATETYPE_PTR_POSITION 0x8 
+#define FASTPATH_UPDATETYPE_COLOR 0x9 
+#define FASTPATH_UPDATETYPE_CACHED 0xA 
+#define FASTPATH_UPDATETYPE_POINTER 0xB 
+
+#define FASTPATH_FRAGMENT_SINGLE 0x0 
+#define FASTPATH_FRAGMENT_LAST 0x1 
+#define FASTPATH_FRAGMENT_FIRST 0x2 
+#define FASTPATH_FRAGMENT_NEXT 0x3 
+
+#define FASTPATH_OUTPUT_COMPRESSION_USED 0x2 
+
+#define CompressionTypeMask 0x0F 
+#define PACKET_COMPRESSED 0x20 
+#define PACKET_AT_FRONT 0x40 
+#define PACKET_FLUSHED 0x80 
+
+#define PACKET_COMPR_TYPE_8K 0x0 
+#define PACKET_COMPR_TYPE_64K 0x1 
+#define PACKET_COMPR_TYPE_RDP6 0x2 
+#define PACKET_COMPR_TYPE_RDP61 0x3 
+
 static const value_string protocol_types[] = {
     { PROTOCOL_RDP, "RDP" },
     { PROTOCOL_SSL, "TLS" },
@@ -361,6 +391,37 @@ static const value_string fast_path_input_event_security [] = {
 	{ 0x0,	NULL }
 };
 
+static const value_string fast_path_output_update_types [] = {
+    { FASTPATH_UPDATETYPE_ORDERS, "Orders Update" },  
+    { FASTPATH_UPDATETYPE_BITMAP, "Bitmap Update" },  
+    { FASTPATH_UPDATETYPE_PALETTE, "Palette Update" },  
+    { FASTPATH_UPDATETYPE_SYNCHRONIZE, "Synchronize Update" },  
+    { FASTPATH_UPDATETYPE_SURFCMDS, "Surface Commands Update" }, 
+    { FASTPATH_UPDATETYPE_PTR_NULL, "System Pointer Hidden Update" },  
+    { FASTPATH_UPDATETYPE_PTR_DEFAULT, "System Pointer Default Update" },  
+    { FASTPATH_UPDATETYPE_PTR_POSITION, "Pointer Position Update" },  
+    { FASTPATH_UPDATETYPE_COLOR, "Color Pointer Update" },  
+    { FASTPATH_UPDATETYPE_CACHED, "Cached Pointer Update" },
+    { FASTPATH_UPDATETYPE_POINTER, "New Pointer Update" },
+    { 0x0,	NULL }
+};
+
+static const value_string fast_path_fragment_types [] = {
+    { FASTPATH_FRAGMENT_SINGLE, "Single" }, 
+    { FASTPATH_FRAGMENT_LAST, "Last" }, 
+    { FASTPATH_FRAGMENT_FIRST, "First" }, 
+    { FASTPATH_FRAGMENT_NEXT, "Next" }, 
+    { 0x0,	NULL }
+};
+
+static const value_string rdp_compress_types [] = {
+    { PACKET_COMPR_TYPE_8K, "RDP 4.0 bulk compression" },
+    { PACKET_COMPR_TYPE_64K, "RDP 5.0 bulk compression" },
+    { PACKET_COMPR_TYPE_RDP6, "RDP 6.0 bulk compression" },
+    { PACKET_COMPR_TYPE_RDP61, "RDP 6.1 bulk compression" },
+    { 0x0,	NULL }
+};
+
 
 void proto_reg_handoff_rdp(void);
 void dissect_ts_caps_set(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
@@ -368,7 +429,7 @@ void dissect_ts_confirm_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto
 void dissect_ts_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
-void dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
+gint32 dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 
 #define RDP_SECURITY_STANDARD 1024
 #define RDP_SECURITY_SSL 1
@@ -377,7 +438,7 @@ void dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tr
 typedef struct _rdp_conv_info_t
 {
     guint32 rdp_security;
-    guint32 have_server_license_error_pdu; // after Server License Error PDU, security header become optional
+    guint32 have_server_license_error_pdu; // frame number. After Server License Error PDU, security header become optional
     guint16 server_port;
     //guint32 encryption_method;
     //guint32 encryption_level;
@@ -582,18 +643,25 @@ dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tr
 	}
 }
 
-void
+#define MCS_GLOBAL_CHANNEL 1003
+
+#define AFTER_FRAME(pinfo, n) ((n) != 0 && (pinfo)->fd->num > (n))
+
+// return value 1 complete, 0 go, -1 error
+gint32
 dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
 	guint16 flags;
 	guint16 flagsHi;
     guint32 length;
+
     rdp_conv_info_t *rdp_info;
+    proto_item *ti;
 
     rdp_info = conversation_data(pinfo);
 
-    if(rdp_info->rdp_security == ENCRYPTION_LEVEL_NONE && rdp_info->have_server_license_error_pdu)
-        return dissect_ts_share_control_header(tvb, pinfo, tree);
+    if(rdp_info->rdp_security == ENCRYPTION_LEVEL_NONE && AFTER_FRAME(pinfo, rdp_info->have_server_license_error_pdu))
+        return 0;
 
 	if (tree)
 	{
@@ -601,7 +669,6 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 
 		if (bytes >= 4)
 		{
-			proto_item *ti;
 			ts_security_header_offset = offset;
 			flags = tvb_get_letohs(tvb, offset);
 			flagsHi = tvb_get_letohs(tvb, offset + 2);
@@ -617,28 +684,38 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 
             if (flags & SEC_EXCHANGE_PKT)
             {
+				col_clear(pinfo->cinfo, COL_INFO);
+				col_add_str(pinfo->cinfo, COL_INFO, "Client Security Exchange PDU");
+
                 // TODO: get encrypted client random
                 length = tvb_get_letohl(tvb, offset);
 
-				col_clear(pinfo->cinfo, COL_INFO);
-				col_add_str(pinfo->cinfo, COL_INFO, "Client Security Exchange PDU");
+                return 1; 
             }
             else if (flags & SEC_INFO_PKT)
 			{
-				dissect_ts_info_packet(tvb, pinfo, tree);
 				col_clear(pinfo->cinfo, COL_INFO);
 				col_add_str(pinfo->cinfo, COL_INFO, "Client Info PDU");
+
+                if (!(flags & SEC_ENCRYPT))
+                {
+                    dissect_ts_info_packet(tvb, pinfo, tree);
+                    return 1; 
+                }
 			}
             else if (flags & SEC_LICENSE_PKT)
             {
 				col_clear(pinfo->cinfo, COL_INFO);
 				col_add_str(pinfo->cinfo, COL_INFO, "Server License Error PDU - Valid Client");
 
-                rdp_info->have_server_license_error_pdu = 1;
+                rdp_info->have_server_license_error_pdu = pinfo->fd->num;
+
+                return 1;
             } 
-            else
+
+            if (flags & SEC_ENCRYPT) // we can not decrypt this, so stop
             {
-                //dissect_ts_share_control_header(tvb, pinfo, tree);
+                return -1;
             }
 		}
 	}
@@ -730,6 +807,7 @@ static void dissect_mcs_server_security_data(tvbuff_t *tvb, packet_info *pinfo _
 
     rdp_conv_info_t *rdp_info = conversation_data(pinfo);
     rdp_info->server_port = pinfo->srcport; // sever -> client
+    //rdp_info->have_server_license_error_pdu = 0; // must reset, because wireshark don't know when to close session
 
     encryption_method = tvb_get_letohl(tvb, offset + 4);
     encryption_level = tvb_get_letohl(tvb, offset + 8);
@@ -857,6 +935,43 @@ static void dissect_mcs_connect_response(tvbuff_t *tvb, packet_info *pinfo _U_ ,
 
 }
 
+#define CHANNEL_FLAG_FIRST 0x00000001 
+#define CHANNEL_FLAG_LAST 0x00000002 
+#define CHANNEL_FLAG_SHOW_PROTOCOL 0x00000010 
+#define CHANNEL_FLAG_SUSPEND 0x00000020 
+#define CHANNEL_FLAG_RESUME 0x00000040 
+#define CHANNEL_PACKET_COMPRESSED 0x00200000 
+#define CHANNEL_PACKET_AT_FRONT 0x00400000 
+#define CHANNEL_PACKET_FLUSHED 0x00800000 
+#define ChannelFlgasCompressionTypeMask 0x000F0000 
+
+static void
+dissect_channel_pdu_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    guint32 length;
+    guint32 flags;
+
+    proto_item *ti;
+    guint32 flags_compression_type;
+    guint8 detail_compression[128] = {'\0'};
+
+    length = tvb_get_letohl(tvb, offset);
+    flags = tvb_get_letohl(tvb, offset + 4);
+
+    if(flags & CHANNEL_PACKET_COMPRESSED)
+    {
+        flags_compression_type = (flags & ChannelFlgasCompressionTypeMask) >> 16;
+        g_snprintf(detail_compression, sizeof(detail_compression), ", %s", 
+                val_to_str(flags_compression_type, rdp_compress_types, "Unknown %d"));
+    }
+    // TODO: other channel flags 
+
+    ti = proto_tree_add_item(tree, hf_rdp_channel, tvb, offset, 8, FALSE);
+    proto_item_set_text(ti, "Channel PDU Header, Length = %d %s", length,
+            detail_compression);
+
+}
+
 static void
 dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
@@ -894,8 +1009,8 @@ dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 
 				case MCS_SEND_DATA_INDICATION:
 				case MCS_SEND_DATA_REQUEST:
-					initiator = tvb_get_ntohs(tvb, offset + 2); // need +1001
-					channelId = tvb_get_ntohs(tvb, offset + 4); // MCS_GLOBAL_CHANNEL=1003
+					initiator = tvb_get_ntohs(tvb, offset + 0); // need +1001
+					channelId = tvb_get_ntohs(tvb, offset + 2); // 
 					offset += 4;
 					flags = tvb_get_guint8(tvb, offset++);
 
@@ -910,15 +1025,31 @@ dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 						length += (guint16) byte;
 					}
 
+
+                    if (channelId != MCS_GLOBAL_CHANNEL)
+                    {
+                        col_append_fstr(pinfo->cinfo, COL_INFO, " %d", channelId);
+                    }
+
 					ti = proto_tree_add_item(tree, hf_rdp_mcs, tvb, mcs_offset, offset - mcs_offset, FALSE);
-					proto_item_set_text(ti, "T.125 MCS %s PDU, Length = %d", val_to_str(type, t125_mcs_tpdu_types, "Unknown %d"), length);
+					proto_item_set_text(ti, "T.125 MCS %s PDU, Length = %d, Channel = %d", val_to_str(type, t125_mcs_tpdu_types, "Unknown %d"), length, channelId);
 
 					real_length = tvb_length(tvb) - rdp_offset;
 					if ((offset - rdp_offset) + length != real_length)
 						proto_item_append_text(ti, " [Length Mismatch: %d]", real_length);
 
-                    dissect_ts_security_header(tvb, pinfo, tree);
-// 需处理 TS_SECURITY_HEADER，如果  Client MCS Connect Initial PDU with GCC Conference Create Request 定义了Client Security Data (TS_UD_CS_SEC) 
+                    // 需处理 TS_SECURITY_HEADER，如果  Client MCS Connect Initial PDU with GCC Conference Create Request 定义了Client Security Data (TS_UD_CS_SEC) 
+                    if(dissect_ts_security_header(tvb, pinfo, tree) == 0)
+                    {
+                        if (channelId == MCS_GLOBAL_CHANNEL)
+                        {
+                            dissect_ts_share_control_header(tvb, pinfo, tree);
+                        }
+                        else
+                        {
+                            dissect_channel_pdu_header(tvb, pinfo, tree);
+                        }
+                    }
 					break;
 
 				default:
@@ -1141,65 +1272,7 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
     return 0;
 }
 
-#define FASTPATH_UPDATETYPE_ORDERS 0x0 
-#define FASTPATH_UPDATETYPE_BITMAP 0x1 
-#define FASTPATH_UPDATETYPE_PALETTE 0x2 
-#define FASTPATH_UPDATETYPE_SYNCHRONIZE 0x3 
-#define FASTPATH_UPDATETYPE_SURFCMDS 0x4 
-#define FASTPATH_UPDATETYPE_PTR_NULL 0x5 
-#define FASTPATH_UPDATETYPE_PTR_DEFAULT 0x6 
-#define FASTPATH_UPDATETYPE_PTR_POSITION 0x8 
-#define FASTPATH_UPDATETYPE_COLOR 0x9 
-#define FASTPATH_UPDATETYPE_CACHED 0xA 
-#define FASTPATH_UPDATETYPE_POINTER 0xB 
 
-#define FASTPATH_FRAGMENT_SINGLE 0x0 
-#define FASTPATH_FRAGMENT_LAST 0x1 
-#define FASTPATH_FRAGMENT_FIRST 0x2 
-#define FASTPATH_FRAGMENT_NEXT 0x3 
-
-#define FASTPATH_OUTPUT_COMPRESSION_USED 0x2 
-
-#define CompressionTypeMask 0x0F 
-#define PACKET_COMPRESSED 0x20 
-#define PACKET_AT_FRONT 0x40 
-#define PACKET_FLUSHED 0x80 
-
-#define PACKET_COMPR_TYPE_8K 0x0 
-#define PACKET_COMPR_TYPE_64K 0x1 
-#define PACKET_COMPR_TYPE_RDP6 0x2 
-#define PACKET_COMPR_TYPE_RDP61 0x3 
-
-static const value_string fast_path_output_update_types [] = {
-    { FASTPATH_UPDATETYPE_ORDERS, "Orders Update" },  
-    { FASTPATH_UPDATETYPE_BITMAP, "Bitmap Update" },  
-    { FASTPATH_UPDATETYPE_PALETTE, "Palette Update" },  
-    { FASTPATH_UPDATETYPE_SYNCHRONIZE, "Synchronize Update" },  
-    { FASTPATH_UPDATETYPE_SURFCMDS, "Surface Commands Update" }, 
-    { FASTPATH_UPDATETYPE_PTR_NULL, "System Pointer Hidden Update" },  
-    { FASTPATH_UPDATETYPE_PTR_DEFAULT, "System Pointer Default Update" },  
-    { FASTPATH_UPDATETYPE_PTR_POSITION, "Pointer Position Update" },  
-    { FASTPATH_UPDATETYPE_COLOR, "Color Pointer Update" },  
-    { FASTPATH_UPDATETYPE_CACHED, "Cached Pointer Update" },
-    { FASTPATH_UPDATETYPE_POINTER, "New Pointer Update" },
-    { 0x0,	NULL }
-};
-
-static const value_string fast_path_fragment_types [] = {
-    { FASTPATH_FRAGMENT_SINGLE, "Single" }, 
-    { FASTPATH_FRAGMENT_LAST, "Last" }, 
-    { FASTPATH_FRAGMENT_FIRST, "First" }, 
-    { FASTPATH_FRAGMENT_NEXT, "Next" }, 
-    { 0x0,	NULL }
-};
-
-static const value_string rdp_compress_types [] = {
-    { PACKET_COMPR_TYPE_8K, "RDP 4.0 bulk compression" },
-    { PACKET_COMPR_TYPE_64K, "RDP 5.0 bulk compression" },
-    { PACKET_COMPR_TYPE_RDP6, "RDP 6.0 bulk compression" },
-    { PACKET_COMPR_TYPE_RDP61, "RDP 6.1 bulk compression" },
-    { 0x0,	NULL }
-};
 
 
 
@@ -1544,6 +1617,8 @@ proto_register_rdp(void)
 		  { "X.224 Header", "rdp.x224", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_rdp_mcs,
 		  { "MCS Header", "rdp.mcs", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_rdp_channel,
+		  { "Channel PDU Header", "rdp.channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_security_header,
 		  { "TS_SECURITY_HEADER", "rdp.sec", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_share_control_header,
