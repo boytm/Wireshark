@@ -574,6 +574,10 @@ dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 	guint8 streamId;
 	guint16 uncompressedLength;
 	guint8 pduType2;
+    guint8 compressed_type;
+    guint16 compressed_length;
+
+    guint8 detail_compression[128] = {'\0'};
 
 	if (tree)
 	{
@@ -587,10 +591,20 @@ dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 			streamId = tvb_get_guint8(tvb, offset + 5);
 			uncompressedLength = tvb_get_letohs(tvb, offset + 6);
 			pduType2 = tvb_get_guint8(tvb, offset + 8);
-			offset += 9;
+            compressed_type = tvb_get_guint8(tvb, offset +9);
+            compressed_length = tvb_get_letohs(tvb, offset + 10);
+			offset += 12;
+
+            if(compressed_type & PACKET_COMPRESSED)
+            {
+                g_snprintf(detail_compression, sizeof(detail_compression), ", %s, Compressed Length %d", 
+                        val_to_str(compressed_type & CompressionTypeMask, rdp_compress_types, "Unknown %d"), compressed_length);
+            }
 
 			ti = proto_tree_add_item(tree, hf_ts_share_data_header, tvb, ts_share_data_header_offset, offset - ts_share_data_header_offset, FALSE);
-			proto_item_set_text(ti, "TS_SHARE_DATA_HEADER: %s", val_to_str(pduType2, pdu2_types, "Unknown %d"));
+			proto_item_set_text(ti, "TS_SHARE_DATA_HEADER: %s, Uncompressed Length %d %s", val_to_str(pduType2, pdu2_types, "Unknown %d"), 
+                    uncompressedLength,
+                    detail_compression);
 
 			col_clear(pinfo->cinfo, COL_INFO);
 			col_add_fstr(pinfo->cinfo, COL_INFO, "%s PDU", val_to_str(pduType2, pdu2_types, "Data %d PDU"));
