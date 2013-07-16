@@ -70,6 +70,9 @@ static int hf_ts_confirm_active_pdu_source_descriptor = -1;
 static int hf_ts_confirm_active_pdu_number_capabilities = -1;
 static int hf_ts_confirm_active_pdu_pad2octets = -1;
 
+static int hf_ts_demand_active_pdu = -1;
+static int hf_ts_demand_active_pdu_sessionid = -1;
+
 static int hf_mcs_connect_response_pdu = -1;
 static int hf_mcs_connect_response_pdu_server_core_data = -1;
 static int hf_mcs_connect_response_pdu_server_network_data = -1;
@@ -545,6 +548,53 @@ dissect_ts_confirm_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree
 }
 
 void
+dissect_ts_demand_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+	guint32 shareId;
+	guint16 lengthSourceDescriptor;
+	guint16 lengthCombinedCapabilities;
+	guint16 numberCapabilities;
+
+    guint32 ts_demand_active_pdu_offset;
+
+	if (tree)
+	{
+		int i;
+		proto_item *ti;
+		proto_tree *ts_demand_active_pdu_tree;
+		proto_tree *ts_capability_sets_tree;
+
+		ts_demand_active_pdu_offset = offset;
+		shareId = tvb_get_letohl(tvb, offset);
+        // compare to Confirm Active PDU, lack originatorId
+		lengthSourceDescriptor = tvb_get_letohs(tvb, offset + 4);
+		lengthCombinedCapabilities = tvb_get_letohs(tvb, offset + 6);
+		numberCapabilities = tvb_get_letohs(tvb, offset + 8 + lengthSourceDescriptor);
+
+		ti = proto_tree_add_item(tree, hf_ts_demand_active_pdu, tvb, ts_demand_active_pdu_offset, -1, TRUE);
+		ts_demand_active_pdu_tree = proto_item_add_subtree(ti, ett_ts_confirm_active_pdu);
+
+		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_shareid, tvb, offset, 4, TRUE);
+		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_length_source_descriptor, tvb, offset + 4, 2, TRUE);
+		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_length_combined_capabilities, tvb, offset + 6, 2, TRUE);
+		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_source_descriptor, tvb, offset + 8, lengthSourceDescriptor, TRUE);
+		offset += (8 + lengthSourceDescriptor);
+
+		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_number_capabilities, tvb, offset, 2, TRUE);
+		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_pad2octets, tvb, offset + 2, 2, TRUE);
+		offset += 4;
+
+		ti = proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_capability_sets, tvb, offset, lengthCombinedCapabilities - 4, TRUE);
+		ts_capability_sets_tree = proto_item_add_subtree(ti, ett_ts_capability_sets);
+
+		for (i = 0; i < numberCapabilities; i++)
+			dissect_ts_caps_set(tvb, pinfo, ts_capability_sets_tree);
+
+        proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_demand_active_pdu_sessionid, tvb, offset, 4, TRUE);
+	}
+}
+
+void
 dissect_ts_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
 	guint32 codePage;
@@ -642,11 +692,17 @@ dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tr
 			{
 				case PDUTYPE_DEMAND_ACTIVE_PDU:
 					col_set_str(pinfo->cinfo, COL_INFO, "Demand Active PDU");
+					dissect_ts_demand_active_pdu(tvb, pinfo, tree);
 					break;
 
 				case PDUTYPE_CONFIRM_ACTIVE_PDU:
 					col_set_str(pinfo->cinfo, COL_INFO, "Confirm Active PDU");
 					dissect_ts_confirm_active_pdu(tvb, pinfo, tree);
+					break;
+
+                case PDUTYPE_DEACTIVATE_ALL_PDU:
+                case PDUTYPE_SERVER_REDIR_PKT:
+					col_set_str(pinfo->cinfo, COL_INFO, val_to_str(pduType, pdu_types, "Unknown %d"));
 					break;
 
 				case PDUTYPE_DATA_PDU:
@@ -1286,8 +1342,16 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
     return 0;
 }
 
+#define TS_STANDARD  0x01 
+#define TS_SECONDARY  0x02 
 
 
+static void
+dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+
+
+}
 
 
 
@@ -1605,7 +1669,9 @@ proto_register_ts_confirm_active_pdu(void)
 		{ &hf_ts_confirm_active_pdu_pad2octets,
 		  { "pad2Octets", "rdp.pad2octets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_capability_sets,
-		  { "capabilitySets", "rdp.capsets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "capabilitySets", "rdp.capsets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_demand_active_pdu_sessionid,
+		  { "sessionId", "rdp.demand_active_pdu_sessionid", FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } }
 	};
 
 	static gint *ett[] = {
@@ -1613,7 +1679,7 @@ proto_register_ts_confirm_active_pdu(void)
 	};
 
 	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
+	proto_register_subtree_array(ett, array_length(ett)); // tree id is used to expanded/collapsed state of the subtree
 }
 
 void
@@ -1641,6 +1707,8 @@ proto_register_rdp(void)
 		  { "TS_SHARE_DATA_HEADER", "rdp.share_data", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_confirm_active_pdu,
 		  { "Confirm Active PDU", "rdp.confirm_active", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_demand_active_pdu,
+		  { "Demand Active PDU", "rdp.demand_active", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_mcs_connect_response_pdu,
 		  { "MCS Connect Response PDU", "rdp.connect_response", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_client_fastinput_event_pdu,
