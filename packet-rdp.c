@@ -60,6 +60,8 @@ static int hf_client_fastinput_event_pdu = -1;
 static int hf_client_fastpath_input_events = -1;
 static int hf_server_fastpath_output_pdu = -1;
 static int hf_server_fastpath_outputs = -1;
+static int hf_server_slowpath_graphics_update = -1;
+static int hf_server_slowpath_pointer_update = -1;
 
 static int hf_ts_confirm_active_pdu = -1;
 static int hf_ts_confirm_active_pdu_shareid = -1;
@@ -617,6 +619,56 @@ dissect_ts_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 	}
 }
 
+#define UPDATETYPE_ORDERS 0x0000 
+#define UPDATETYPE_BITMAP 0x0001 
+#define UPDATETYPE_PALETTE 0x0002 
+#define UPDATETYPE_SYNCHRONIZE 0x0003 
+
+static const value_string slow_path_graphics_update_types[] = {
+    { UPDATETYPE_ORDERS, "Orders Update" },
+    { UPDATETYPE_BITMAP, " Bitmap Graphics Update" },
+    { UPDATETYPE_PALETTE, "Palette Update" },
+    { UPDATETYPE_SYNCHRONIZE, "Synchronize Update"},
+    { 0x0,	NULL }
+};
+
+#define TS_PTRMSGTYPE_SYSTEM 0x0001 
+#define TS_PTRMSGTYPE_POSITION 0x0003 
+#define TS_PTRMSGTYPE_COLOR 0x0006 
+#define TS_PTRMSGTYPE_CACHED 0x0007 
+#define TS_PTRMSGTYPE_POINTER 0x0008 
+
+static const value_string slow_path_pointer_update_types[] = {
+    { TS_PTRMSGTYPE_SYSTEM, "System Pointer Update" },
+    { TS_PTRMSGTYPE_POSITION, "Pointer Position Update" },
+    { TS_PTRMSGTYPE_COLOR, "Color Pointer Update" },
+    { TS_PTRMSGTYPE_CACHED, "Cached Pointer Update" },
+    { TS_PTRMSGTYPE_POINTER, "New Pointer Update" },
+    { 0x0,	NULL }
+};
+
+void
+dissect_ts_server_graphics_update(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    proto_item *ti;
+    guint16 message_type = tvb_get_letohs(tvb, offset);
+
+    ti = proto_tree_add_item(tree, hf_server_slowpath_graphics_update, tvb, offset, -1, FALSE);
+    proto_item_set_text(ti, "Server Graphics Update PDU: %s", val_to_str(message_type, slow_path_graphics_update_types, "Unknown %d"));
+
+    col_set_str(pinfo->cinfo, COL_INFO, val_to_str(message_type, slow_path_graphics_update_types, "Unknown %d"));
+}
+void
+dissect_ts_server_pointer_update(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    proto_item *ti;
+    guint16 message_type = tvb_get_letohs(tvb, offset);
+
+    ti = proto_tree_add_item(tree, hf_server_slowpath_pointer_update, tvb, offset, -1, FALSE);
+    proto_item_set_text(ti, "Server Pointer Update PDU : %s", val_to_str(message_type, slow_path_pointer_update_types, "Unknown %d"));
+
+    col_set_str(pinfo->cinfo, COL_INFO, val_to_str(message_type, slow_path_pointer_update_types, "Unknown %d"));
+}
 void
 dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
@@ -658,6 +710,16 @@ dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 
 			col_clear(pinfo->cinfo, COL_INFO);
 			col_add_fstr(pinfo->cinfo, COL_INFO, "%s PDU", val_to_str(pduType2, pdu2_types, "Data %d PDU"));
+
+            switch (pduType2)
+            {
+                case PDUTYPE2_UPDATE:
+                    dissect_ts_server_graphics_update(tvb, pinfo, tree);
+                    break;
+                case PDUTYPE2_POINTER:
+                    dissect_ts_server_pointer_update(tvb, pinfo, tree);
+                    break;
+            }
 		}
 	}
 }
@@ -686,7 +748,7 @@ dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tr
 
 			offset += 6;
 			ti = proto_tree_add_item(tree, hf_ts_share_control_header, tvb, ts_share_control_header_offset, offset - ts_share_control_header_offset, FALSE);
-			proto_item_set_text(ti, "TS_SHARE_CONTROL_HEADER: %s", val_to_str(pduType, pdu_types, "Unknown %d"));
+			proto_item_set_text(ti, "TS_SHARE_CONTROL_HEADER: %s, length %d", val_to_str(pduType, pdu_types, "Unknown %d"), totalLength);
 
 			switch (pduType)
 			{
@@ -1349,7 +1411,7 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
 static void
 dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
-
+// primary drawing order, alternate secondary drawing order hard to extract length
 
 }
 
@@ -1367,7 +1429,8 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
     guint8 compression;
 
     proto_item *ti;
-    guint8 update_detail[128] = {'\0'};
+    guint8 update_detail[256] = {'\0'};
+    gint32 update_detail_offset = 0;
     guint32 bytes_remaining;
     guint32 update_header_offset;
 
@@ -1377,6 +1440,7 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
     {
         // reset
         memset(update_detail, 0, sizeof(update_detail));
+        update_detail_offset = 0;
         update_header_offset = offset;
 
         update_header = tvb_get_guint8(tvb, offset++);
@@ -1388,16 +1452,29 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
         {
             compression_flgas = tvb_get_guint8(tvb, offset++);
 
-            g_snprintf(update_detail, sizeof(update_detail), "%s",
+            update_detail_offset += g_snprintf(update_detail, sizeof(update_detail), ", %s",
                     val_to_str(compression_flgas & CompressionTypeMask, rdp_compress_types, "Unknown %d"));
+            // TODO: decompress
         }
 
         size = tvb_get_letohs(tvb, offset);
         offset += 2;
 
+        if (compression != FASTPATH_OUTPUT_COMPRESSION_USED && update_code == FASTPATH_UPDATETYPE_ORDERS)
+        {
+            guint16 idx;
+            guint16 number_orders = tvb_get_letohs(tvb, offset);
+            g_snprintf(update_detail + update_detail_offset, array_length(update_detail) - update_detail_offset, ", Order number %d", number_orders);
+
+            for (idx = 0; idx < number_orders; ++idx)
+            {
+                dissect_order_data(tvb_new_subset_remaining(tvb, offset + 2), pinfo, tree);
+            }
+        }
+
 
         ti = proto_tree_add_item(tree, hf_ts_output_update, tvb, update_header_offset, offset - update_header_offset + size, TRUE);
-        proto_item_set_text(ti, "%s, Fragment %s, %s", 
+        proto_item_set_text(ti, "%s, Fragment %s %s", 
                 val_to_str(update_code, fast_path_output_update_types, "Unknown %d"), 
                 val_to_str(fragmentation, fast_path_fragment_types, "Unknown %d"),
                 update_detail);
@@ -1718,7 +1795,11 @@ proto_register_rdp(void)
 		{ &hf_server_fastpath_output_pdu,
 		  { "Server Fast-Path Update PDU", "rdp.fp_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_server_fastpath_outputs,
-		  { "fpOutputUpdates", "rdp.fp_output_updates", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "fpOutputUpdates", "rdp.fp_output_updates", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_server_slowpath_graphics_update,
+		  { "Server Graphics Update PDU", "rdp.sp_graphics_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_server_slowpath_pointer_update,
+		  { "Server Pointer Update PDU", "rdp.sp_pointer_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
 	};
 
 	static gint *ett[] = {
