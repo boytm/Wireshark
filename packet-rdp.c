@@ -98,6 +98,20 @@ static int hf_ts_caps_set_capability_set_type = -1;
 static int hf_ts_caps_set_length_capability = -1;
 static int hf_ts_caps_set_capability_data = -1;
 
+static int hf_ts_client_info_pdu_codepage = -1;
+static int hf_ts_client_info_pdu_flags = -1;
+static int hf_ts_client_info_pdu_domain_len = -1;
+static int hf_ts_client_info_pdu_user_name_len = -1;
+static int hf_ts_client_info_pdu_password_len = -1;
+static int hf_ts_client_info_pdu_alternate_shell_len = -1;
+static int hf_ts_client_info_pdu_working_dir_len = -1;
+static int hf_ts_client_info_pdu_domain = -1;
+static int hf_ts_client_info_pdu_user_name = -1;
+static int hf_ts_client_info_pdu_password = -1;
+static int hf_ts_client_info_pdu_alternate_shell = -1;
+static int hf_ts_client_info_pdu_working_dir = -1;
+
+
 static gint ett_rdp = -1;
 static gint ett_ts_confirm_active_pdu = -1;
 static gint ett_ts_capability_sets = -1;
@@ -106,6 +120,7 @@ static gint ett_mcs_connect_response_pdu = -1;
 static gint ett_ts_server_secutiry_data = -1;
 static gint ett_ts_input_events = -1;
 static gint ett_ts_output_updates = -1;
+static gint ett_ts_client_info_pdu = -1;
 
 #define SEC_EXCHANGE_PKT			0x0001
 #define SEC_ENCRYPT				0x0008
@@ -431,7 +446,7 @@ static const value_string rdp_compress_types [] = {
 void proto_reg_handoff_rdp(void);
 void dissect_ts_caps_set(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_confirm_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
-void dissect_ts_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
+void dissect_ts_client_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 gint32 dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
@@ -548,7 +563,7 @@ dissect_ts_confirm_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree
 			dissect_ts_caps_set(tvb, pinfo, ts_capability_sets_tree);
 	}
 }
-
+// ENC_NA
 void
 dissect_ts_demand_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
@@ -597,7 +612,7 @@ dissect_ts_demand_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 }
 
 void
-dissect_ts_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+dissect_ts_client_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
 	guint32 codePage;
 	guint32 flags;
@@ -607,15 +622,52 @@ dissect_ts_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 	guint16 cbAlternateShell;
 	guint16 cbWorkingDir;
 
-	if (tree)
+	if (tree && tvb_length_remaining(tvb, offset) >= 18)
 	{
 		codePage = tvb_get_letohl(tvb, offset);
-		flags = tvb_get_letohl(tvb, offset + 4);
-		cbDomain = tvb_get_letohs(tvb, offset + 6);
-		cbUserName = tvb_get_letohs(tvb, offset + 8);
-		cbPassword = tvb_get_letohs(tvb, offset + 10);
-		cbAlternateShell = tvb_get_letohs(tvb, offset + 12);
-		cbWorkingDir = tvb_get_letohs(tvb, offset + 14);
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_codepage, tvb, offset, 4, ENC_LITTLE_ENDIAN);
+        offset += 4;
+
+		flags = tvb_get_letohl(tvb, offset);
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_flags, tvb, offset, 4, ENC_LITTLE_ENDIAN);
+        offset += 4;
+
+		cbDomain = tvb_get_letohs(tvb, offset) + 2;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_domain_len, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+
+		cbUserName = tvb_get_letohs(tvb, offset) + 2;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_user_name_len, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+
+		cbPassword = tvb_get_letohs(tvb, offset) + 2;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_password_len, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+
+		cbAlternateShell = tvb_get_letohs(tvb, offset) + 2;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_alternate_shell_len, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+
+		cbWorkingDir = tvb_get_letohs(tvb, offset) + 2;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_working_dir_len, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+
+
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_domain, tvb, offset, cbDomain, ENC_UTF_16 | ENC_LITTLE_ENDIAN);
+        offset += cbDomain;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_user_name, tvb, offset, cbUserName, ENC_UTF_16 | ENC_LITTLE_ENDIAN);
+        offset += cbUserName;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_password, tvb, offset, cbPassword, ENC_UTF_16 | ENC_LITTLE_ENDIAN);
+        offset += cbPassword;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_alternate_shell, tvb, offset, cbAlternateShell, ENC_UTF_16 | ENC_LITTLE_ENDIAN);
+        offset += cbAlternateShell;
+        proto_tree_add_item(tree, hf_ts_client_info_pdu_working_dir, tvb, offset, cbWorkingDir, ENC_UTF_16 | ENC_LITTLE_ENDIAN);
+        offset += cbWorkingDir;
+
+        if (tvb_length_remaining(tvb, offset) > 0)
+        {
+            // Extended Info Packet
+        }
 	}
 }
 
@@ -789,6 +841,7 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 
     rdp_conv_info_t *rdp_info;
     proto_item *ti;
+    proto_tree *subtree;
 
     rdp_info = conversation_data(pinfo);
 
@@ -831,7 +884,8 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 
                 if (!(flags & SEC_ENCRYPT))
                 {
-                    dissect_ts_info_packet(tvb, pinfo, tree);
+                    subtree = proto_item_add_subtree(ti, ett_ts_client_info_pdu);
+                    dissect_ts_client_info_packet(tvb, pinfo, subtree);
                     return 1; 
                 }
 			}
@@ -1213,6 +1267,15 @@ dissect_x224(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 
 			if (length > 1)
 			{
+
+                switch (type)
+                {
+                    case X224_CONNECTION_REQUEST:
+                    case X224_CONNECTION_CONFIRM:
+                        col_clear(pinfo->cinfo, COL_INFO);
+                        col_add_fstr(pinfo->cinfo, COL_INFO, "X.224 %s PDU", val_to_str(type, x224_tpdu_types, "Unknown %d"));
+                }
+
                 if(type == X224_CONNECTION_CONFIRM && length > 7)
                 {
                     guint8 nego_type = tvb_get_guint8(tvb, offset + 7);
@@ -1799,11 +1862,40 @@ proto_register_rdp(void)
 		{ &hf_server_slowpath_graphics_update,
 		  { "Server Graphics Update PDU", "rdp.sp_graphics_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_server_slowpath_pointer_update,
-		  { "Server Pointer Update PDU", "rdp.sp_pointer_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "Server Pointer Update PDU", "rdp.sp_pointer_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        // Client Info PDU
+        { &hf_ts_client_info_pdu_codepage,
+            { "codepage", "rdp.client_info_pdu_codepage", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_flags,
+            { "flags", "rdp.client_info_pdu_flags", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_domain_len,
+            { "domain_len", "rdp.client_info_pdu_domain_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_user_name_len,
+            { "user_name_len", "rdp.client_info_pdu_user_name_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_password_len,
+            { "password_len", "rdp.client_info_pdu_password_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_alternate_shell_len,
+            { "alternate_shell_len", "rdp.client_info_pdu_alternate_shell_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_working_dir_len,
+            { "working_dir_len", "rdp.client_info_pdu_working_dir_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_client_info_pdu_domain,
+            { "domain", "rdp.client_info_pdu_domain", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_user_name,
+            { "user_name", "rdp.client_info_pdu_user_name", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_password,
+            { "password", "rdp.client_info_pdu_password", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_alternate_shell,
+            { "alternate_shell", "rdp.client_info_pdu_alternate_shell", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_client_info_pdu_working_dir,
+            { "working_dir", "rdp.client_info_pdu_working_dir", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
 	};
 
 	static gint *ett[] = {
-		&ett_rdp
+		&ett_rdp,
+        &ett_ts_client_info_pdu,
+
 	};
 
 	proto_rdp = proto_register_protocol("Remote Desktop Protocol", "RDP", "rdp");
