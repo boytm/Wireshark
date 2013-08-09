@@ -54,6 +54,7 @@ static int hf_rdp_x224 = -1;
 static int hf_rdp_mcs = -1;
 static int hf_rdp_channel = -1;
 static int hf_ts_security_header = -1;
+static int hf_ts_client_info_pdu = -1;
 static int hf_ts_share_control_header = -1;
 static int hf_ts_share_data_header = -1;
 static int hf_client_fastinput_event_pdu = -1;
@@ -841,6 +842,7 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 
     rdp_conv_info_t *rdp_info;
     proto_item *ti;
+    proto_item *ti_client_info;
     proto_tree *subtree;
 
     rdp_info = conversation_data(pinfo);
@@ -882,9 +884,11 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 				col_clear(pinfo->cinfo, COL_INFO);
 				col_add_str(pinfo->cinfo, COL_INFO, "Client Info PDU");
 
+                ti_client_info = proto_tree_add_item(tree, hf_ts_client_info_pdu, tvb, offset, -1, FALSE);
+
                 if (!(flags & SEC_ENCRYPT))
                 {
-                    subtree = proto_item_add_subtree(ti, ett_ts_client_info_pdu);
+                    subtree = proto_item_add_subtree(ti_client_info, ett_ts_client_info_pdu);
                     dissect_ts_client_info_packet(tvb, pinfo, subtree);
                     return 1; 
                 }
@@ -1523,6 +1527,7 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
         size = tvb_get_letohs(tvb, offset);
         offset += 2;
 
+        // if not compression, then dissect ORDER
         if (compression != FASTPATH_OUTPUT_COMPRESSION_USED && update_code == FASTPATH_UPDATETYPE_ORDERS)
         {
             guint16 idx;
@@ -1841,6 +1846,8 @@ proto_register_rdp(void)
 		  { "Channel PDU Header", "rdp.channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_security_header,
 		  { "TS_SECURITY_HEADER", "rdp.sec", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_client_info_pdu,
+		  { "Client Info PDU", "rdp.client_info", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_share_control_header,
 		  { "TS_SHARE_CONTROL_HEADER", "rdp.share_ctrl", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_share_data_header,
