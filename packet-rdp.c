@@ -46,6 +46,7 @@ gint ts_share_control_header_offset = 0;
 gint ts_share_data_header_offset = 0;
 gint ts_confirm_active_pdu_offset = 0;
 gint ts_caps_set_offset = 0;
+//gint order_offset = 0;
 
 int proto_rdp = -1;
 static int hf_rdp_rdp = -1;
@@ -456,6 +457,22 @@ gint32 dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_
 #define RDP_SECURITY_SSL 1
 #define RDP_SECURITY_HYBRID 2
 #define RDP_SECURITY_ENHANCED 0x8000
+
+typedef struct primary_drawing_order
+{
+    guint8 order_type;
+
+    guint16 left;
+    guint16 top;
+    guint16 right;
+    guint16 bottom;
+
+    gint16 bound_left;
+    gint16 bound_top;
+    gint16 bound_right;
+    gint16 bound_bottom;
+} primary_drawing_order_info_t;
+
 typedef struct _rdp_conv_info_t
 {
     guint32 rdp_security;
@@ -467,6 +484,7 @@ typedef struct _rdp_conv_info_t
     //guint32 exponent;
     //char[256] server_modulus;
     //char[256] client_modulus;
+    primary_drawing_order_info_t last_primary_drawing_order;
 
 } rdp_conv_info_t;
 
@@ -485,11 +503,37 @@ inline rdp_conv_info_t* conversation_data(packet_info *pinfo)
         rdp_info = se_new(rdp_conv_info_t);
 
         memset(rdp_info, 0, sizeof(*rdp_info));
+        rdp_info->last_primary_drawing_order.order_type = 1; // patblt
 
         conversation_add_proto_data(conversation, proto_rdp, rdp_info);
     }
 
     return rdp_info;
+}
+
+#define PACKET_PRIMARY_DRAWING_ORDER_KEY 0;
+
+static primary_drawing_order_info_t* rdp_get_primay_drawing_order_info(packet_info *pinfo _U_, primary_drawing_order_info_t *temp)
+{
+    primary_drawing_order_info_t *pi;
+    guint8 key = PACKET_PRIMARY_DRAWING_ORDER_KEY;
+
+    pi = (primary_drawing_order_info_t *)p_get_proto_data(pinfo->fd, proto_rdp, key);
+
+    if (pi)
+    {
+        memcpy(temp, pi, sizeof(*pi));
+        return temp; // return copy
+    }
+    else
+    {
+        pi = se_new(primary_drawing_order_info_t);
+        p_add_proto_data(pinfo->fd, proto_rdp, key, pi);
+
+        memcpy(pi, &(conversation_data(pinfo)->last_primary_drawing_order), sizeof(*pi));
+
+        return &(conversation_data(pinfo)->last_primary_drawing_order);
+    }
 }
 
 void
@@ -700,17 +744,41 @@ static const value_string slow_path_pointer_update_types[] = {
     { 0x0,	NULL }
 };
 
+static void
+dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint16 number_orders, primary_drawing_order_info_t *state);
+
+void
+dissect_ts_slow_path_orders(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    proto_item *ti;
+    guint16 number_orders;
+
+    primary_drawing_order_info_t temp_primary_drawing_order, *pdo;
+    pdo = rdp_get_primay_drawing_order_info(pinfo, &temp_primary_drawing_order);
+
+    number_orders = tvb_get_letohs(tvb, offset);
+    offset += 2;
+
+    offset += 2; // pad2OctetsB 
+    dissect_order_data(tvb, pinfo, tree, number_orders, pdo);
+}
+
 void
 dissect_ts_server_graphics_update(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
     proto_item *ti;
-    guint16 message_type = tvb_get_letohs(tvb, offset);
+    guint16 update_type = tvb_get_letohs(tvb, offset);
 
     ti = proto_tree_add_item(tree, hf_server_slowpath_graphics_update, tvb, offset, -1, FALSE);
-    proto_item_set_text(ti, "Server Graphics Update PDU: %s", val_to_str(message_type, slow_path_graphics_update_types, "Unknown %d"));
+    proto_item_set_text(ti, "Server Graphics Update PDU: %s", val_to_str(update_type, slow_path_graphics_update_types, "Unknown %d"));
 
-    col_set_str(pinfo->cinfo, COL_INFO, val_to_str(message_type, slow_path_graphics_update_types, "Unknown %d"));
+    col_set_str(pinfo->cinfo, COL_INFO, val_to_str(update_type, slow_path_graphics_update_types, "Unknown %d"));
+
+    offset += 4;
+    if (update_type == UPDATETYPE_ORDERS)
+        dissect_ts_slow_path_orders(tvb, pinfo, tree);
 }
+
 void
 dissect_ts_server_pointer_update(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
@@ -722,6 +790,7 @@ dissect_ts_server_pointer_update(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_t
 
     col_set_str(pinfo->cinfo, COL_INFO, val_to_str(message_type, slow_path_pointer_update_types, "Unknown %d"));
 }
+
 void
 dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
@@ -1471,17 +1540,652 @@ dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
     return 0;
 }
 
-#define TS_STANDARD  0x01 
-#define TS_SECONDARY  0x02 
+#define TS_STANDARD 0x01 
+#define TS_SECONDARY 0x02 
+#define TS_BOUNDS 0x04 
+#define TS_TYPE_CHANGE 0x08 
+#define TS_DELTA_COORDINATES 0x10 
+#define TS_ZERO_BOUNDS_DELTAS 0x20 
+#define TS_ZERO_FIELD_BYTE_BIT0 0x40 
+#define TS_ZERO_FIELD_BYTE_BIT1 0x80 
 
 
-static void
-dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+#define TS_BOUND_LEFT 0x01 
+#define TS_BOUND_TOP 0x02 
+#define TS_BOUND_RIGHT 0x04 
+#define TS_BOUND_BOTTOM 0x08 
+#define TS_BOUND_DELTA_LEFT 0x10 
+#define TS_BOUND_DELTA_TOP 0x20 
+#define TS_BOUND_DELTA_RIGHT 0x40 
+#define TS_BOUND_DELTA_BOTTOM 0x80 
+
+
+#define TS_ENC_DSTBLT_ORDER 0x00 
+#define TS_ENC_PATBLT_ORDER 0x01 
+#define TS_ENC_SCRBLT_ORDER 0x02 
+#define TS_ENC_DRAWNINEGRID_ORDER 0x07 
+#define TS_ENC_MULTI_DRAWNINEGRID_ORDER 0x08 
+#define TS_ENC_LINETO_ORDER 0x09 
+#define TS_ENC_OPAQUERECT_ORDER 0x0A  
+#define TS_ENC_SAVEBITMAP_ORDER 0x0B  
+#define TS_ENC_MEMBLT_ORDER 0x0D  
+#define TS_ENC_MEM3BLT_ORDER 0x0E 
+#define TS_ENC_MULTIDSTBLT_ORDER 0x0F  
+#define TS_ENC_MULTIPATBLT_ORDER 0x10  
+#define TS_ENC_MULTISCRBLT_ORDER 0x11  
+#define TS_ENC_MULTIOPAQUERECT_ORDER 0x12 
+#define TS_ENC_FAST_INDEX_ORDER 0x13 
+#define TS_ENC_POLYGON_SC_ORDER 0x14  
+#define TS_ENC_POLYGON_CB_ORDER 0x15  
+#define TS_ENC_POLYLINE_ORDER 0x16  
+#define TS_ENC_FAST_GLYPH_ORDER 0x18  
+#define TS_ENC_ELLIPSE_SC_ORDER 0x19  
+#define TS_ENC_ELLIPSE_CB_ORDER 0x1A  
+#define TS_ENC_INDEX_ORDER 0x1B 
+
+#define TS_CACHE_BITMAP_UNCOMPRESSED 0x00 
+#define TS_CACHE_COLOR_TABLE 0x01 
+#define TS_CACHE_BITMAP_COMPRESSED 0x02 
+#define TS_CACHE_GLYPH 0x03 
+#define TS_CACHE_BITMAP_UNCOMPRESSED_REV2 0x04 
+#define TS_CACHE_BITMAP_COMPRESSED_REV2 0x05 
+#define TS_CACHE_BRUSH 0x07 
+#define TS_CACHE_BITMAP_COMPRESSED_REV3 0x08 
+
+#define TS_ALTSEC_SWITCH_SURFACE 0x00 
+#define TS_ALTSEC_CREATE_OFFSCR_BITMAP 0x01 
+#define TS_ALTSEC_STREAM_BITMAP_FIRST 0x02 
+#define TS_ALTSEC_STREAM_BITMAP_NEXT 0x03 
+#define TS_ALTSEC_CREATE_NINEGRID_BITMAP 0x04 
+#define TS_ALTSEC_GDIP_FIRST 0x05 
+#define TS_ALTSEC_GDIP_NEXT 0x06 
+#define TS_ALTSEC_GDIP_END 0x07 
+#define TS_ALTSEC_GDIP_CACHE_FIRST 0x08 
+#define TS_ALTSEC_GDIP_CACHE_NEXT 0x09 
+#define TS_ALTSEC_GDIP_CACHE_END 0x0A 
+#define TS_ALTSEC_WINDOW 0x0B 
+#define TS_ALTSEC_COMPDESK_FIRST 0x0C 
+#define TS_ALTSEC_FRAME_MARKER 0x0D 
+
+static const value_string primary_drawing_order_types[] = {
+    { TS_ENC_DSTBLT_ORDER, "DstBlt Primary Drawing Order" },
+    { TS_ENC_PATBLT_ORDER, "PatBlt Primary Drawing Order" },
+    { TS_ENC_SCRBLT_ORDER, "ScrBlt Primary Drawing Order" },
+    { TS_ENC_DRAWNINEGRID_ORDER, "DrawNineGrid Primary Drawing Order" },
+    { TS_ENC_MULTI_DRAWNINEGRID_ORDER, "MultiDrawNineGrid Primary Drawing Order" },
+    { TS_ENC_LINETO_ORDER, "LineTo Primary Drawing Order" },
+    { TS_ENC_OPAQUERECT_ORDER, "OpaqueRect Primary Drawing Order" },
+    { TS_ENC_SAVEBITMAP_ORDER, "SaveBitmap Primary Drawing Order" },
+    { TS_ENC_MEMBLT_ORDER, "MemBlt Primary Drawing Order" },
+    { TS_ENC_MEM3BLT_ORDER, "Mem3Blt Primary Drawing Order" },
+    { TS_ENC_MULTIDSTBLT_ORDER, "MultiDstBlt Primary Drawing Order" },
+    { TS_ENC_MULTIPATBLT_ORDER, "MultiPatBlt Primary Drawing Order" },
+    { TS_ENC_MULTISCRBLT_ORDER, "MultiScrBlt Primary Drawing Order" },
+    { TS_ENC_MULTIOPAQUERECT_ORDER, "MultiOpaqueRect Primary Drawing Order" },
+    { TS_ENC_FAST_INDEX_ORDER, "FastIndex Primary Drawing Order" },
+    { TS_ENC_POLYGON_SC_ORDER, "PolygonSC Primary Drawing Order" },
+    { TS_ENC_POLYGON_CB_ORDER, "PolygonCB Primary Drawing Order" },
+    { TS_ENC_POLYLINE_ORDER, "Polyline Primary Drawing Order" },
+    { TS_ENC_FAST_GLYPH_ORDER, "FastGlyph Primary Drawing Order" },
+    { TS_ENC_ELLIPSE_SC_ORDER, "EllipseSC Primary Drawing Order" },
+    { TS_ENC_ELLIPSE_CB_ORDER, "EllipseCB Primary Drawing Order" },
+    { TS_ENC_INDEX_ORDER, "GlyphIndex Primary Drawing Order" },
+    { 0x0,	NULL }
+};
+
+static const value_string secondary_drawing_order_types[] = {
+    { TS_CACHE_BITMAP_UNCOMPRESSED, "Cache Bitmap - Revision 1" },
+    { TS_CACHE_COLOR_TABLE, "Cache Color Table" },
+    { TS_CACHE_BITMAP_COMPRESSED, "Cache Bitmap - Revision 1" },
+    { TS_CACHE_GLYPH, "Cache Glyph - Revision 1 or Cache Glyph - Revision 2" },
+    { TS_CACHE_BITMAP_UNCOMPRESSED_REV2, "Cache Bitmap - Revision 2" },
+    { TS_CACHE_BITMAP_COMPRESSED_REV2, "Cache Bitmap - Revision 2" },
+    { TS_CACHE_BRUSH, "Cache Brush" },
+    { TS_CACHE_BITMAP_COMPRESSED_REV3, "Cache Bitmap - Revision 3" },
+    { 0x0,	NULL }
+};
+     
+static const value_string alternate_secondary_drawing_order_types[] = {
+    { TS_ALTSEC_SWITCH_SURFACE, "Switch Surface Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_CREATE_OFFSCR_BITMAP, "Create Offscreen Bitmap Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_STREAM_BITMAP_FIRST, "Stream Bitmap First (Revision 1 and 2) Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_STREAM_BITMAP_NEXT, "Stream Bitmap Next Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_CREATE_NINEGRID_BITMAP, "Create NineGrid Bitmap Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_GDIP_FIRST, "Draw GDI+ First Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_GDIP_NEXT, "Draw GDI+ Next Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_GDIP_END, "Draw GDI+ End Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_GDIP_CACHE_FIRST, "Draw GDI+ First Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_GDIP_CACHE_NEXT, "Draw GDI+ Cache Next Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_GDIP_CACHE_END, "Draw GDI+ Cache End Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_WINDOW, "Windowing Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_COMPDESK_FIRST, "Desktop Composition Alternate Secondary Drawing Order " },
+    { TS_ALTSEC_FRAME_MARKER, "Frame Marker Alternate Secondary Drawing Order " },
+    { 0x0,	NULL }
+};
+
+gint hf_ts_order_data = -1;
+gint hf_ts_primary_drawing_order = -1;
+gint hf_ts_secondary_drawing_order = -1;
+gint hf_ts_alternate_secondary_drawing_order = -1;
+gint hf_ts_primary_drawing_order_field_flags = -1;
+gint hf_ts_primary_drawing_order_bounds = -1;
+gint hf_ts_order_type = -1;
+
+gint hf_ts_order_bounds_delta_left = -1;
+gint hf_ts_order_bounds_delta_top = -1;
+gint hf_ts_order_bounds_delta_right = -1;
+gint hf_ts_order_bounds_delta_bottom = -1;
+
+gint hf_ts_order_bounds_left = -1;
+gint hf_ts_order_bounds_top = -1;
+gint hf_ts_order_bounds_right = -1;
+gint hf_ts_order_bounds_bottom = -1;
+
+gint hf_ts_order_delta_left = -1;
+gint hf_ts_order_delta_top = -1;
+gint hf_ts_order_delta_width = -1;
+gint hf_ts_order_delta_height = -1;
+
+gint hf_ts_order_left = -1;
+gint hf_ts_order_top = -1;
+gint hf_ts_order_width = -1;
+gint hf_ts_order_height = -1;
+
+gint hf_ts_order_delta_src_x = -1;
+gint hf_ts_order_delta_src_y = -1;
+gint hf_ts_order_src_x = -1;
+gint hf_ts_order_src_y = -1;
+
+gint ett_ts_order_data = -1;
+gint ett_ts_primary_drawing_order = -1;
+gint ett_ts_primary_drawing_order_bounds = -1;
+
+static int 
+dissect_order_bounds(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
-// primary drawing order, alternate secondary drawing order hard to extract length
+    proto_item *ti;
+    guint8 bounds_flag = 0;
+    guint8 present = 0;
+
+    gint bounds_offset = offset;
+    present = tvb_get_guint8(tvb, bounds_offset++);
+
+    if (present & TS_BOUND_LEFT)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_left, tvb, bounds_offset, 2, ENC_LITTLE_ENDIAN);
+        bounds_offset += 2;
+    }
+    else if (present & TS_BOUND_DELTA_LEFT)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_delta_left, tvb, bounds_offset, 1, ENC_LITTLE_ENDIAN);
+        bounds_offset += 1;
+    }
+
+    if (present & TS_BOUND_TOP)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_top, tvb, bounds_offset, 2, ENC_LITTLE_ENDIAN);
+        bounds_offset += 2;
+    }
+    else if (present & TS_BOUND_DELTA_TOP)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_delta_top, tvb, bounds_offset, 1, ENC_LITTLE_ENDIAN);
+        bounds_offset += 1;
+    }
+
+    if (present & TS_BOUND_RIGHT)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_right, tvb, bounds_offset, 2, ENC_LITTLE_ENDIAN);
+        bounds_offset += 2;
+    }
+    else if (present & TS_BOUND_DELTA_RIGHT)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_delta_right, tvb, bounds_offset, 1, ENC_LITTLE_ENDIAN);
+        bounds_offset += 1;
+    }
+
+    if (present & TS_BOUND_BOTTOM)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_bottom, tvb, bounds_offset, 2, ENC_LITTLE_ENDIAN);
+        bounds_offset += 2;
+    }
+    else if (present & TS_BOUND_DELTA_BOTTOM)
+    {
+        if (tree)
+            ti = proto_tree_add_item(tree, hf_ts_order_bounds_delta_bottom, tvb, bounds_offset, 1, ENC_LITTLE_ENDIAN);
+        bounds_offset += 1;
+    }
+
+    return bounds_offset - offset;
+}
+
+static void 
+dissect_order_brush(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    if (present & 1)
+    {
+        offset++;
+        //in_uint8(s, brush->xorigin);
+    }
+
+    if (present & 2)
+    {
+        offset++;
+        //in_uint8(s, brush->yorigin);
+    }
+
+    if (present & 4)
+    {
+        offset++;
+        //in_uint8(s, brush->style);
+    }
+
+    if (present & 8)
+    {
+        offset++;
+        //in_uint8(s, brush->pattern[0]);
+    }
+
+    if (present & 16)
+    {
+        offset++;
+        //in_uint8a(s, brush->pattern + 1, 7);
+    }
+}
+
+static void 
+dissect_order_coordinate(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, gint coor, gint coor_delta, guint8 delta_coordinates)
+{
+    gint coor_offset = offset;
+
+    if (delta_coordinates)
+    {
+        offset += 1;
+        proto_tree_add_item(tree, coor_delta, tvb, coor_offset, offset - coor_offset, ENC_LITTLE_ENDIAN);
+    }
+    else
+    {
+        offset += 2;
+        proto_tree_add_item(tree, coor, tvb, coor_offset, offset - coor_offset, ENC_LITTLE_ENDIAN);
+    }
 
 }
 
+static int 
+dissect_order_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 0x0001)
+    {
+        offset += 2;
+        //in_uint8(s, self->state.memblt_cache_id);
+        //in_uint8(s, self->state.memblt_color_table);
+    }
+
+    if (present & 0x0002)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_left, hf_ts_order_delta_left, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.memblt_x, delta);
+    }
+
+    if (present & 0x0004)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_top, hf_ts_order_delta_top, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.memblt_y, delta);
+    }
+
+    if (present & 0x0008)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_width, hf_ts_order_delta_width, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.memblt_cx, delta);
+    }
+
+    if (present & 0x0010)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_height, hf_ts_order_delta_height, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.memblt_cy, delta);
+    }
+
+    if (present & 0x0020)
+    {
+        offset++;
+        //in_uint8(s, self->state.memblt_opcode);
+    }
+
+    if (present & 0x0040)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_src_x, hf_ts_order_delta_src_x, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.memblt_srcx, delta);
+    }
+
+    if (present & 0x0080)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_src_y, hf_ts_order_delta_src_y, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.memblt_srcy, delta);
+    }
+
+    if (present & 0x0100)
+    {
+        offset += 2;
+        //in_uint16_le(s, self->state.memblt_cache_idx);
+    }
+
+}
+
+
+static int 
+dissect_order_opaque_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 0x01)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_left, hf_ts_order_delta_left, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.rect_x, delta);
+    }
+
+    if (present & 0x02)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_top, hf_ts_order_delta_top, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.rect_y, delta);
+    }
+
+    if (present & 0x04)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_width, hf_ts_order_delta_width, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.rect_cx, delta);
+    }
+
+    if (present & 0x08)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_height, hf_ts_order_delta_height, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.rect_cy, delta);
+    }
+
+    if (present & 0x10)
+    {
+        offset++;
+        //in_uint8(s, i);
+        //self->state.rect_color = (self->state.rect_color & 0xffffff00) | i;
+    }
+
+    if (present & 0x20)
+    {
+        offset++;
+        //in_uint8(s, i);
+        //self->state.rect_color = (self->state.rect_color & 0xffff00ff) | (i << 8);
+    }
+
+    if (present & 0x40)
+    {
+        offset++;
+        //in_uint8(s, i);
+        //self->state.rect_color = (self->state.rect_color & 0xff00ffff) | (i << 16);
+    }
+}
+
+static int 
+dissect_order_glyph_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 0x000001)
+    {
+        offset++;
+        //in_uint8(s, self->state.text_font);
+    }
+
+    if (present & 0x000002)
+    {
+        offset++;
+        //in_uint8(s, self->state.text_flags);
+    }
+
+    if (present & 0x000004)
+    {
+        offset++;
+        //in_uint8(s, self->state.text_opcode);
+    }
+
+    if (present & 0x000008)
+    {
+        offset++;
+        //in_uint8(s, self->state.text_mixmode);
+    }
+
+    if (present & 0x000010)
+    {
+        offset += 3;
+        //rdp_orders_in_color(s, &self->state.text_fgcolor);
+    }
+
+    if (present & 0x000020)
+    {
+        offset += 3;
+        //rdp_orders_in_color(s, &self->state.text_bgcolor);
+    }
+
+    if (present & 0x000040)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_clipleft);
+    }
+
+    if (present & 0x000080)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_cliptop);
+    }
+
+    if (present & 0x000100)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_clipright);
+    }
+
+    if (present & 0x000200)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_clipbottom);
+    }
+
+    if (present & 0x000400)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_boxleft);
+    }
+
+    if (present & 0x000800)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_boxtop);
+    }
+
+    if (present & 0x001000)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_boxright);
+    }
+
+    if (present & 0x002000)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_boxbottom);
+    }
+
+    dissect_order_brush(tvb, pinfo, tree, present >> 14);
+
+    if (present & 0x080000)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_x);
+    }
+
+    if (present & 0x100000)
+    {
+        offset += 2;
+        //in_sint16_le(s, self->state.text_y);
+    }
+
+    if (present & 0x200000)
+    {
+        guint8 length = tvb_get_guint8(tvb, offset++);
+        offset += length;
+        //in_uint8(s, self->state.text_length);
+        //in_uint8a(s, self->state.text_text, self->state.text_length);
+    }
+}
+
+static void
+dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint16 number_orders, primary_drawing_order_info_t *state)
+{
+    proto_item *ti;
+    proto_tree *subtree;
+    proto_item *order_item;
+    proto_tree *order_tree;
+    gint32 order_offset;
+    guint8 control_flags;
+    guint8 order_type;
+    guint8 delta_coordinates;
+    guint8 size;
+    guint16 idx;
+
+    const guint8 order_type_mask = TS_STANDARD | TS_SECONDARY;
+// primary drawing order, alternate secondary drawing order hard to extract length
+
+    for (idx = 0; idx < number_orders; ++idx)
+    {
+        ti = NULL;
+        subtree = NULL;
+
+        order_offset = offset;
+        control_flags = tvb_get_guint8(tvb, offset++); 
+
+        if ((control_flags & order_type_mask) == TS_STANDARD)
+        {
+            // primary
+            guint32 field_flags = 0;
+
+            order_item = proto_tree_add_item(tree, hf_ts_primary_drawing_order, tvb, order_offset, -1, ENC_NA);
+            order_tree = proto_item_add_subtree(order_item, ett_ts_primary_drawing_order);
+
+            if (control_flags & TS_TYPE_CHANGE)
+            {
+                proto_tree_add_item(order_tree, hf_ts_order_type, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+                state->order_type = tvb_get_guint8(tvb, offset++);
+            }
+
+            proto_item_set_text(order_item, "%s", val_to_str(state->order_type, primary_drawing_order_types, "Unknown %d"));
+
+            // fieldFlags
+            switch (state->order_type)
+            {
+                case TS_ENC_MEM3BLT_ORDER:
+                case TS_ENC_INDEX_ORDER:
+                    size = 3;
+                    break;
+
+                case TS_ENC_PATBLT_ORDER:
+                case TS_ENC_MULTIPATBLT_ORDER:
+                case TS_ENC_MULTIOPAQUERECT_ORDER:
+                case TS_ENC_MULTISCRBLT_ORDER:
+                case TS_ENC_MEMBLT_ORDER:
+                case TS_ENC_LINETO_ORDER:
+                case TS_ENC_FAST_INDEX_ORDER:
+                case TS_ENC_FAST_GLYPH_ORDER:
+                case TS_ENC_POLYGON_CB_ORDER:
+                case TS_ENC_ELLIPSE_CB_ORDER:
+                    size = 2;
+                    break;
+
+                default:
+                    size = 1;
+                    break;
+            }
+
+            if (control_flags & TS_ZERO_FIELD_BYTE_BIT0)
+                size -= 1;
+            if (control_flags & TS_ZERO_FIELD_BYTE_BIT1)
+                size -= 2;
+
+            assert(!(size < 0 || size > 3));
+
+            proto_tree_add_item(order_tree, hf_ts_primary_drawing_order_field_flags, tvb, offset, size, ENC_LITTLE_ENDIAN);
+
+            if (size == 1)
+                field_flags = tvb_get_guint8(tvb, offset);
+            else if (size == 2)
+                field_flags = tvb_get_letohs(tvb, offset);
+            else if (size == 3)
+                field_flags = tvb_get_letoh24(tvb, offset);
+
+            offset += size;
+
+            // bounds
+            if (control_flags & TS_BOUNDS && ! (control_flags & TS_ZERO_BOUNDS_DELTAS))
+            {
+                gint bounds_length = dissect_order_bounds(tvb, pinfo, NULL);
+
+                ti = proto_tree_add_item(order_tree, hf_ts_primary_drawing_order_bounds, tvb, offset, bounds_length, ENC_NA);
+                subtree = proto_item_add_subtree(ti, ett_ts_primary_drawing_order_bounds);
+                dissect_order_bounds(tvb, pinfo, subtree);
+
+                offset += bounds_length;
+            }
+
+            // primary order data
+            // TODO: 优先级最高的 memblt, opaque rect, glyph index
+            delta_coordinates = control_flags & TS_DELTA_COORDINATES;
+            switch (state->order_type)
+            {
+                case TS_ENC_MEMBLT_ORDER:
+                    dissect_order_memblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_OPAQUERECT_ORDER:
+                    dissect_order_opaque_rect(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_INDEX_ORDER:
+                    dissect_order_glyph_index(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                default:
+                    return;
+
+            }
+
+            proto_item_set_len(order_item, offset - order_offset); // know length till dissect completely
+        }
+        else if ((control_flags & order_type_mask) == (TS_STANDARD | TS_SECONDARY))
+        {
+            guint16 extra_flags;
+            guint16 order_length = tvb_get_letohs(tvb, offset) + 13;// for historical reasons
+            offset += 2;
+
+            extra_flags = tvb_get_letohs(tvb, offset);
+            offset += 2;
+
+            order_type = tvb_get_guint8(tvb, offset++);
+
+            order_item = proto_tree_add_item(tree, hf_ts_secondary_drawing_order, tvb, order_offset, order_length, ENC_NA);
+            proto_item_set_text(order_item, "%s, Length %d", 
+                    val_to_str(order_type, secondary_drawing_order_types, "Unknown %d"),
+                    order_length);
+
+            offset = order_offset + order_length;
+        }
+        else if ((control_flags & order_type_mask) == TS_SECONDARY)
+        {
+            order_type = control_flags >> 2;
+
+            order_item = proto_tree_add_item(tree, hf_ts_alternate_secondary_drawing_order, tvb, order_offset, -1, ENC_NA);
+            proto_item_set_text(order_item, "%s", val_to_str(order_type, alternate_secondary_drawing_order_types, "Unknown %d"));
+            return ;// TODO: could not dissect
+        }
+    }
+}
 
 
 static gint32
@@ -1500,6 +2204,10 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
     gint32 update_detail_offset = 0;
     guint32 bytes_remaining;
     guint32 update_header_offset;
+    gint saved_offset;
+
+    primary_drawing_order_info_t temp_primary_drawing_order, *pdo;
+    pdo = rdp_get_primay_drawing_order_info(pinfo, &temp_primary_drawing_order);
 
     bytes_remaining = tvb_length_remaining(tvb, offset);
 
@@ -1527,21 +2235,26 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
         size = tvb_get_letohs(tvb, offset);
         offset += 2;
 
+        ti = proto_tree_add_item(tree, hf_ts_output_update, tvb, update_header_offset, offset - update_header_offset + size, ENC_NA);
         // if not compression, then dissect ORDER
         if (compression != FASTPATH_OUTPUT_COMPRESSION_USED && update_code == FASTPATH_UPDATETYPE_ORDERS)
         {
-            guint16 idx;
-            guint16 number_orders = tvb_get_letohs(tvb, offset);
+            guint16 number_orders;
+
+            saved_offset = offset;
+
+            number_orders = tvb_get_letohs(tvb, offset);
+            offset += 2;
+
             g_snprintf(update_detail + update_detail_offset, array_length(update_detail) - update_detail_offset, ", Order number %d", number_orders);
 
-            for (idx = 0; idx < number_orders; ++idx)
-            {
-                dissect_order_data(tvb_new_subset_remaining(tvb, offset + 2), pinfo, tree);
-            }
+            //dissect_order_data(tvb_new_subset_length(tvb, offset, size - 2), pinfo, tree);
+            dissect_order_data(tvb, pinfo, tree, number_orders, pdo);
+            
+            offset = saved_offset; // restore offset
         }
 
 
-        ti = proto_tree_add_item(tree, hf_ts_output_update, tvb, update_header_offset, offset - update_header_offset + size, TRUE);
         proto_item_set_text(ti, "%s, Fragment %s %s", 
                 val_to_str(update_code, fast_path_output_update_types, "Unknown %d"), 
                 val_to_str(fragmentation, fast_path_fragment_types, "Unknown %d"),
@@ -1731,7 +2444,7 @@ proto_register_ts_output_updates(void)
 	static hf_register_info hf[] =
 	{
 		{ &hf_ts_output_update,
-		  { "outputUpdate", "rdp.input_event", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "outputUpdate", "rdp.output_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
 	};
 
 	static gint *ett[] = {
@@ -1876,15 +2589,15 @@ proto_register_rdp(void)
         { &hf_ts_client_info_pdu_flags,
             { "flags", "rdp.client_info_pdu_flags", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_client_info_pdu_domain_len,
-            { "domain_len", "rdp.client_info_pdu_domain_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "cbDomain", "rdp.client_info_pdu_domain_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_client_info_pdu_user_name_len,
-            { "user_name_len", "rdp.client_info_pdu_user_name_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "cbUserName", "rdp.client_info_pdu_user_name_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_client_info_pdu_password_len,
-            { "password_len", "rdp.client_info_pdu_password_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "cbPassword", "rdp.client_info_pdu_password_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_client_info_pdu_alternate_shell_len,
-            { "alternate_shell_len", "rdp.client_info_pdu_alternate_shell_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "cbAlternateShell", "rdp.client_info_pdu_alternate_shell_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_client_info_pdu_working_dir_len,
-            { "working_dir_len", "rdp.client_info_pdu_working_dir_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "cbWorkingDir", "rdp.client_info_pdu_working_dir_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
         { &hf_ts_client_info_pdu_domain,
             { "domain", "rdp.client_info_pdu_domain", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
@@ -1896,13 +2609,77 @@ proto_register_rdp(void)
             { "alternate_shell", "rdp.client_info_pdu_alternate_shell", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_client_info_pdu_working_dir,
             { "working_dir", "rdp.client_info_pdu_working_dir", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        // order
+        { &hf_ts_order_data,
+            { "orderData", "rdp.order_data", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_primary_drawing_order,
+            { "primary_drawing_order", "rdp.primary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_secondary_drawing_order,
+            { "secondary_drawing_order", "rdp.secondary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_alternate_secondary_drawing_order,
+            { "alternate_secondary_drawing_order", "rdp.alternate_secondary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_primary_drawing_order_field_flags,
+            { "primary_drawing_order_field_flags", "rdp.primary_drawing_order_field_flags", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_primary_drawing_order_bounds,
+            { "primary_drawing_order_bounds", "rdp.primary_drawing_order_bounds", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_type,
+            { "orderType", "rdp.order_type", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_bounds_delta_left,
+            { "order_bounds_delta_left", "rdp.order_bounds_delta_left", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bounds_delta_top,
+            { "order_bounds_delta_top", "rdp.order_bounds_delta_top", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bounds_delta_right,
+            { "order_bounds_delta_right", "rdp.order_bounds_delta_right", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bounds_delta_bottom,
+            { "order_bounds_delta_bottom", "rdp.order_bounds_delta_bottom", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_bounds_left,
+            { "order_bounds_left", "rdp.order_bounds_left", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bounds_top,
+            { "order_bounds_top", "rdp.order_bounds_top", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bounds_right,
+            { "order_bounds_right", "rdp.order_bounds_right", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bounds_bottom,
+            { "order_bounds_bottom", "rdp.order_bounds_bottom", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_delta_left,
+            { "nLeftRect Delta", "rdp.order_delta_left", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_delta_top,
+            { "nTopRect Delta", "rdp.order_delta_top", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_delta_width,
+            { "nWidth Delta", "rdp.order_delta_width", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_delta_height,
+            { "nHeight Delta", "rdp.order_delta_height", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_left,
+            { "nLeftRect", "rdp.order_left", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_top,
+            { "nTopRect", "rdp.order_top", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_width,
+            { "nWidth", "rdp.order_width", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_height,
+            { "nHeight", "rdp.order_height", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_delta_src_x,
+            { "nXSrc Delta", "rdp.order_delta_src_x", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_delta_src_y,
+            { "nYSrc Delta", "rdp.order_delta_src_y", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_src_x,
+            { "nXSrc", "rdp.order_src_x", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_src_y,
+            { "nYSrc", "rdp.order_src_y", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
 
 	};
 
 	static gint *ett[] = {
 		&ett_rdp,
         &ett_ts_client_info_pdu,
-
+        &ett_ts_order_data,
+        &ett_ts_primary_drawing_order,
+        &ett_ts_primary_drawing_order_bounds,
 	};
 
 	proto_rdp = proto_register_protocol("Remote Desktop Protocol", "RDP", "rdp");
