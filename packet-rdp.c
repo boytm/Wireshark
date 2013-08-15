@@ -745,12 +745,11 @@ static const value_string slow_path_pointer_update_types[] = {
 };
 
 static void
-dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint16 number_orders, primary_drawing_order_info_t *state);
+dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *ti, guint16 number_orders, primary_drawing_order_info_t *state);
 
 void
-dissect_ts_slow_path_orders(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+dissect_ts_slow_path_orders(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *ti)
 {
-    proto_item *ti;
     guint16 number_orders;
 
     primary_drawing_order_info_t temp_primary_drawing_order, *pdo;
@@ -760,7 +759,7 @@ dissect_ts_slow_path_orders(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *
     offset += 2;
 
     offset += 2; // pad2OctetsB 
-    dissect_order_data(tvb, pinfo, tree, number_orders, pdo);
+    dissect_order_data(tvb, pinfo, ti, number_orders, pdo);
 }
 
 void
@@ -776,7 +775,7 @@ dissect_ts_server_graphics_update(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_
 
     offset += 4;
     if (update_type == UPDATETYPE_ORDERS)
-        dissect_ts_slow_path_orders(tvb, pinfo, tree);
+        dissect_ts_slow_path_orders(tvb, pinfo, ti);
 }
 
 void
@@ -2038,7 +2037,7 @@ dissect_order_glyph_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tr
 }
 
 static void
-dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint16 number_orders, primary_drawing_order_info_t *state)
+dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, guint16 number_orders, primary_drawing_order_info_t *state)
 {
     proto_item *ti;
     proto_tree *subtree;
@@ -2054,6 +2053,7 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, gui
     const guint8 order_type_mask = TS_STANDARD | TS_SECONDARY;
 // primary drawing order, alternate secondary drawing order hard to extract length
 
+    proto_tree *tree = proto_item_add_subtree(item, ett_ts_order_data);
     for (idx = 0; idx < number_orders; ++idx)
     {
         ti = NULL;
@@ -2249,7 +2249,7 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
             g_snprintf(update_detail + update_detail_offset, array_length(update_detail) - update_detail_offset, ", Order number %d", number_orders);
 
             //dissect_order_data(tvb_new_subset_length(tvb, offset, size - 2), pinfo, tree);
-            dissect_order_data(tvb, pinfo, tree, number_orders, pdo);
+            dissect_order_data(tvb, pinfo, ti, number_orders, pdo);
             
             offset = saved_offset; // restore offset
         }
