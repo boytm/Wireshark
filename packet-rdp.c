@@ -1764,41 +1764,7 @@ dissect_order_bounds(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
     return bounds_offset - offset;
 }
 
-static void 
-dissect_order_brush(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
-{
-    if (present & 1)
-    {
-        offset++;
-        //in_uint8(s, brush->xorigin);
-    }
-
-    if (present & 2)
-    {
-        offset++;
-        //in_uint8(s, brush->yorigin);
-    }
-
-    if (present & 4)
-    {
-        offset++;
-        //in_uint8(s, brush->style);
-    }
-
-    if (present & 8)
-    {
-        offset++;
-        //in_uint8(s, brush->pattern[0]);
-    }
-
-    if (present & 16)
-    {
-        offset++;
-        //in_uint8a(s, brush->pattern + 1, 7);
-    }
-}
-
-static void 
+inline void 
 dissect_order_coordinate(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, gint coor, gint coor_delta, guint8 delta_coordinates)
 {
     gint coor_offset = offset;
@@ -1816,93 +1782,368 @@ dissect_order_coordinate(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tre
 
 }
 
-static int 
-dissect_order_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+inline void 
+dissect_order_destination_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
-    if (present & 0x0001)
-    {
-        offset += 2;
-        //in_uint8(s, self->state.memblt_cache_id);
-        //in_uint8(s, self->state.memblt_color_table);
-    }
-
-    if (present & 0x0002)
+    if (present & 1)
     {
         dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_left, hf_ts_order_delta_left, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.memblt_x, delta);
     }
 
-    if (present & 0x0004)
+    if (present & 2)
     {
         dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_top, hf_ts_order_delta_top, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.memblt_y, delta);
     }
 
-    if (present & 0x0008)
+    if (present & 4)
     {
         dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_width, hf_ts_order_delta_width, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.memblt_cx, delta);
     }
 
-    if (present & 0x0010)
+    if (present & 8)
     {
         dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_height, hf_ts_order_delta_height, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.memblt_cy, delta);
-    }
-
-    if (present & 0x0020)
-    {
-        offset++;
-        //in_uint8(s, self->state.memblt_opcode);
-    }
-
-    if (present & 0x0040)
-    {
-        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_src_x, hf_ts_order_delta_src_x, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.memblt_srcx, delta);
-    }
-
-    if (present & 0x0080)
-    {
-        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_src_y, hf_ts_order_delta_src_y, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.memblt_srcy, delta);
-    }
-
-    if (present & 0x0100)
-    {
-        offset += 2;
-        //in_uint16_le(s, self->state.memblt_cache_idx);
     }
 
 }
 
+gint hf_ts_order_op_left = -1;
+gint hf_ts_order_op_top = -1;
+gint hf_ts_order_op_right = -1;
+gint hf_ts_order_op_bottom = -1; 
 
-static int 
+gint hf_ts_order_op_delta_left = -1;
+gint hf_ts_order_op_delta_top = -1;
+gint hf_ts_order_op_delta_right = -1;
+gint hf_ts_order_op_delta_bottom = -1;
+
+inline void 
 dissect_order_opaque_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
-    if (present & 0x01)
+    if (present & 1)
     {
-        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_left, hf_ts_order_delta_left, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.rect_x, delta);
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_op_left, hf_ts_order_op_delta_left, delta_coordinates);
     }
 
-    if (present & 0x02)
+    if (present & 2)
     {
-        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_top, hf_ts_order_delta_top, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.rect_y, delta);
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_op_top, hf_ts_order_op_delta_top, delta_coordinates);
     }
 
-    if (present & 0x04)
+    if (present & 4)
     {
-        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_width, hf_ts_order_delta_width, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.rect_cx, delta);
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_op_right, hf_ts_order_op_delta_right, delta_coordinates);
     }
 
-    if (present & 0x08)
+    if (present & 8)
     {
-        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_height, hf_ts_order_delta_height, delta_coordinates);
-        //rdp_orders_in_coord(s, &self->state.rect_cy, delta);
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_op_bottom, hf_ts_order_op_delta_bottom, delta_coordinates);
     }
+
+}
+
+gint hf_ts_order_bk_left = -1;
+gint hf_ts_order_bk_top = -1;
+gint hf_ts_order_bk_right = -1;
+gint hf_ts_order_bk_bottom = -1; 
+
+gint hf_ts_order_bk_delta_left = -1;
+gint hf_ts_order_bk_delta_top = -1;
+gint hf_ts_order_bk_delta_right = -1;
+gint hf_ts_order_bk_delta_bottom = -1;
+
+inline void 
+dissect_order_text_background_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 1)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_bk_left, hf_ts_order_bk_delta_left, delta_coordinates);
+    }
+
+    if (present & 2)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_bk_top, hf_ts_order_bk_delta_top, delta_coordinates);
+    }
+
+    if (present & 4)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_bk_right, hf_ts_order_bk_delta_right, delta_coordinates);
+    }
+
+    if (present & 8)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_bk_bottom, hf_ts_order_bk_delta_bottom, delta_coordinates);
+    }
+
+}
+
+gint hf_ts_order_brush_x = -1;
+gint hf_ts_order_brush_y = -1;
+gint hf_ts_order_brush_style = -1;
+gint hf_ts_order_brush_hatch = -1;
+gint hf_ts_order_brush_extra = -1;
+
+inline void 
+dissect_order_brush(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    gint brush_offset = offset;
+
+    if (present & 1)
+    {
+        proto_tree_add_item(tree, hf_ts_order_brush_x, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        offset++;
+    }
+
+    if (present & 2)
+    {
+        proto_tree_add_item(tree, hf_ts_order_brush_y, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        offset++;
+    }
+
+    if (present & 4)
+    {
+        proto_tree_add_item(tree, hf_ts_order_brush_style, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        offset++;
+    }
+
+    if (present & 8)
+    {
+        proto_tree_add_item(tree, hf_ts_order_brush_hatch, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+        offset++;
+    }
+
+    if (present & 16)
+    {
+        proto_tree_add_item(tree, hf_ts_order_brush_extra, tvb, offset, 7, ENC_NA);
+        offset += 7;
+    }
+}
+
+gint hf_ts_order_binary_raster_operation = -1;
+gint hf_ts_order_ternary_raster_operation = -1;
+
+inline int 
+dissect_order_binary_raster_operation(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    if (present & 1)
+    {
+        proto_tree_add_item(tree, hf_ts_order_binary_raster_operation, tvb, offset, 1, ENC_NA);
+        offset++;
+    }
+}
+
+inline int 
+dissect_order_ternary_raster_operation(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    if (present & 1)
+    {
+        proto_tree_add_item(tree, hf_ts_order_ternary_raster_operation, tvb, offset, 1, ENC_NA);
+        offset++;
+    }
+}
+
+inline void dissect_order_src_x(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 1)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_src_x, hf_ts_order_delta_src_x, delta_coordinates);
+        //rdp_orders_in_coord(s, &self->state.memblt_srcx, delta);
+    }
+}
+
+inline void dissect_order_src_y(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 1)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_src_y, hf_ts_order_delta_src_y, delta_coordinates);
+    }
+}
+
+inline void dissect_order_src_coordinate(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    dissect_order_src_x(tvb, pinfo, tree, present, delta_coordinates);
+    dissect_order_src_y(tvb, pinfo, tree, present >> 1, delta_coordinates);
+}
+
+gint hf_ts_order_back_color = -1;
+gint hf_ts_order_fore_color = -1;
+
+inline void dissect_order_color(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, gint hf_index)
+{
+    if (present & 1)
+    {
+        //proto_tree_add_item(tree, hf_index, tvb, offset, 3, ENC_NA);
+        offset += 3;
+    }
+}
+
+inline void dissect_order_back_fore_color(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    dissect_order_color(tvb, pinfo, tree, present >> 1, hf_ts_order_back_color);
+    dissect_order_color(tvb, pinfo, tree, present, hf_ts_order_fore_color);
+}
+
+gint hf_ts_delta_encoded_rectangles_field_left = -1;
+gint hf_ts_delta_encoded_rectangles_field_top = -1;
+gint hf_ts_delta_encoded_rectangles_field_width = -1;
+gint hf_ts_delta_encoded_rectangles_field_height = -1;
+gint hf_ts_delta_encoded_points_field_x = -1;
+gint hf_ts_delta_encoded_points_field_y = -1;
+
+inline void parse_rectangle(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    guint8 first_encoding_byte;
+
+#define DELTA_ENCODED_RECTANGLES_FIELD(mask, hf_index) \
+    first_encoding_byte = tvb_get_guint8(tvb, offset); \
+    if (present & mask) \
+    { \
+         \
+        if (first_encoding_byte & 0x80) \
+        { \
+            proto_tree_add_bits_item(tree, hf_index, tvb, offset * 8 + 1, 15, ENC_BIG_ENDIAN); \
+            offset += 2; \
+        } \
+        else \
+        { \
+            proto_tree_add_bits_item(tree, hf_index, tvb, offset * 8 + 1, 7, ENC_BIG_ENDIAN); \
+            offset += 1; \
+        } \
+    } \
+
+    // left
+    DELTA_ENCODED_RECTANGLES_FIELD(8, hf_ts_delta_encoded_rectangles_field_left);
+    // top
+    DELTA_ENCODED_RECTANGLES_FIELD(4, hf_ts_delta_encoded_rectangles_field_top);
+    // width
+    DELTA_ENCODED_RECTANGLES_FIELD(2, hf_ts_delta_encoded_rectangles_field_width);
+    // height
+    DELTA_ENCODED_RECTANGLES_FIELD(1, hf_ts_delta_encoded_rectangles_field_height);
+}
+
+inline void parse_point(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    guint8 first_encoding_byte;
+
+    // x
+    DELTA_ENCODED_RECTANGLES_FIELD(2, hf_ts_delta_encoded_points_field_x);
+    // y
+    DELTA_ENCODED_RECTANGLES_FIELD(1, hf_ts_delta_encoded_points_field_y);
+
+#undef DELTA_ENCODED_RECTANGLES_FIELD
+}
+
+#define CEIL(x, y) (x / y + (x % y ? 1 : 0))
+
+static int dissect_order_delta_encoded_rectangles(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
+{
+    guint8 flags;
+    guint8 zero_bits_length = CEIL(delta_entries, 2);
+    gint zero_bits_offset = offset;
+    offset += zero_bits_length;
+
+    for(; delta_entries > 0; --delta_entries)
+    {
+        flags = tvb_get_guint8(tvb, zero_bits_offset++);
+
+        parse_rectangle(tvb, pinfo, tree, flags >> 4);
+
+        if (--delta_entries > 0)
+            parse_rectangle(tvb, pinfo, tree, flags);
+    }
+}
+
+static int dissect_order_delta_encoded_points(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
+{
+    guint8 flags;
+    guint8 zero_bits_length = CEIL(delta_entries, 4);
+    gint zero_bits_offset = offset;
+    offset += zero_bits_length;
+
+    for(; delta_entries > 0; --delta_entries)
+    {
+        flags = tvb_get_guint8(tvb, zero_bits_offset++);
+
+        parse_point(tvb, pinfo, tree, flags >> 6);
+
+        if (--delta_entries > 0)
+            parse_point(tvb, pinfo, tree, flags >> 4);
+
+        if (--delta_entries > 0)
+            parse_point(tvb, pinfo, tree, flags >> 2);
+
+        if (--delta_entries > 0)
+            parse_point(tvb, pinfo, tree, flags);
+    }
+}
+
+static int 
+dissect_order_dstblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 4);
+}
+
+
+static int 
+dissect_order_multi_dstblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    guint8 delta_entries = 0;
+
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 4);
+
+    if (present & 0x0020)
+    {
+        delta_entries = tvb_get_guint8(tvb, offset);
+        // nDeltaEntries
+        offset++;
+    }
+
+    if (present & 0x0040)
+    {
+        // nDeltaEntries
+        dissect_order_delta_encoded_rectangles(tvb, pinfo, tree, delta_entries);
+    }
+}
+
+static int 
+dissect_order_patblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 4);
+    dissect_order_back_fore_color(tvb, pinfo, tree, present >> 5);
+    dissect_order_brush(tvb, pinfo, tree, present >> 7);
+}
+
+static int 
+dissect_order_multi_patblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    guint8 delta_entries = 0;
+
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 4);
+    dissect_order_back_fore_color(tvb, pinfo, tree, present >> 5);
+    dissect_order_brush(tvb, pinfo, tree, present >> 7);
+
+    if (present & 0x1000)
+    {
+        delta_entries = tvb_get_guint8(tvb, offset);
+        // nDeltaEntries
+        offset++;
+    }
+
+    if (present & 0x2000)
+    {
+        // nDeltaEntries
+        dissect_order_delta_encoded_rectangles(tvb, pinfo, tree, delta_entries);
+    }
+}
+
+static int 
+dissect_order_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
 
     if (present & 0x10)
     {
@@ -1925,6 +2166,103 @@ dissect_order_opaque_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tr
         //self->state.rect_color = (self->state.rect_color & 0xff00ffff) | (i << 16);
     }
 }
+
+static int 
+dissect_order_multi_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    guint8 delta_entries = 0;
+
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
+
+    if (present & 0x10)
+    {
+        offset++;
+        //in_uint8(s, i);
+        //self->state.rect_color = (self->state.rect_color & 0xffffff00) | i;
+    }
+
+    if (present & 0x20)
+    {
+        offset++;
+        //in_uint8(s, i);
+        //self->state.rect_color = (self->state.rect_color & 0xffff00ff) | (i << 8);
+    }
+
+    if (present & 0x40)
+    {
+        offset++;
+        //in_uint8(s, i);
+        //self->state.rect_color = (self->state.rect_color & 0xff00ffff) | (i << 16);
+    }
+
+    if (present & 0x80)
+    {
+        delta_entries = tvb_get_guint8(tvb, offset);
+        // nDeltaEntries
+        offset++;
+    }
+
+    if (present & 0x0100)
+    {
+        // nDeltaEntries
+        dissect_order_delta_encoded_rectangles(tvb, pinfo, tree, delta_entries);
+    }
+}
+
+static int 
+dissect_order_srcblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 4);
+    dissect_order_src_coordinate(tvb, pinfo, tree, present >> 5, delta_coordinates);
+}
+
+static int 
+dissect_order_multi_srcblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    guint8 delta_entries = 0;
+
+    dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 4);
+    dissect_order_src_coordinate(tvb, pinfo, tree, present >> 5, delta_coordinates);
+
+    if (present & 0x80)
+    {
+        delta_entries = tvb_get_guint8(tvb, offset);
+        // nDeltaEntries
+        offset++;
+    }
+
+    if (present & 0x0100)
+    {
+        // nDeltaEntries
+        dissect_order_delta_encoded_rectangles(tvb, pinfo, tree, delta_entries);
+    }
+}
+
+static int 
+dissect_order_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 0x0001)
+    {
+        offset += 2;
+        //in_uint8(s, self->state.memblt_cache_id);
+        //in_uint8(s, self->state.memblt_color_table);
+    }
+
+    dissect_order_destination_rect(tvb, pinfo, tree, present >> 1, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 5);
+    dissect_order_src_coordinate(tvb, pinfo, tree, present >> 6, delta_coordinates);
+
+    if (present & 0x0100)
+    {
+        offset += 2;
+        //in_uint16_le(s, self->state.memblt_cache_idx);
+    }
+
+}
+
+
 
 static int 
 dissect_order_glyph_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
@@ -2139,12 +2477,40 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
             delta_coordinates = control_flags & TS_DELTA_COORDINATES;
             switch (state->order_type)
             {
-                case TS_ENC_MEMBLT_ORDER:
+                case TS_ENC_DSTBLT_ORDER: // srcblt
+                    dissect_order_dstblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_MULTIDSTBLT_ORDER:
+                    dissect_order_multi_dstblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_PATBLT_ORDER: // patblt
+                    dissect_order_patblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_MULTIPATBLT_ORDER:
+                    dissect_order_multi_patblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_SCRBLT_ORDER: // srcblt
+                    dissect_order_srcblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_MULTISCRBLT_ORDER:
+                    dissect_order_multi_srcblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_MEMBLT_ORDER: // memblt
                     dissect_order_memblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
                     break;
 
-                case TS_ENC_OPAQUERECT_ORDER:
-                    dissect_order_opaque_rect(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                case TS_ENC_OPAQUERECT_ORDER: // opaque rect
+                    dissect_order_rect(tvb, pinfo, order_tree, field_flags, delta_coordinates);
+                    break;
+
+                case TS_ENC_MULTIOPAQUERECT_ORDER:
+                    dissect_order_multi_rect(tvb, pinfo, order_tree, field_flags, delta_coordinates);
                     break;
 
                 case TS_ENC_INDEX_ORDER:
@@ -2613,36 +2979,38 @@ proto_register_rdp(void)
         { &hf_ts_order_data,
             { "orderData", "rdp.order_data", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_primary_drawing_order,
-            { "primary_drawing_order", "rdp.primary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+            { "Primary Drawing Order", "rdp.primary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_secondary_drawing_order,
-            { "secondary_drawing_order", "rdp.secondary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+            { "Secondary Drawing Order", "rdp.secondary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_alternate_secondary_drawing_order,
-            { "alternate_secondary_drawing_order", "rdp.alternate_secondary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+            { "Alternate Secondary Drawing Order", "rdp.alternate_secondary_drawing_order", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_primary_drawing_order_field_flags,
-            { "primary_drawing_order_field_flags", "rdp.primary_drawing_order_field_flags", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+            { "fieldFlags", "rdp.primary_drawing_order_field_flags", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_primary_drawing_order_bounds,
-            { "primary_drawing_order_bounds", "rdp.primary_drawing_order_bounds", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+            { "bounds", "rdp.primary_drawing_order_bounds", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_type,
-            { "orderType", "rdp.order_type", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+            { "orderType", "rdp.order_type", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
 
+        // order, bounds
         { &hf_ts_order_bounds_delta_left,
-            { "order_bounds_delta_left", "rdp.order_bounds_delta_left", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "delta_left", "rdp.order_bounds_delta_left", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_bounds_delta_top,
-            { "order_bounds_delta_top", "rdp.order_bounds_delta_top", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "delta_top", "rdp.order_bounds_delta_top", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_bounds_delta_right,
-            { "order_bounds_delta_right", "rdp.order_bounds_delta_right", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "delta_right", "rdp.order_bounds_delta_right", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_bounds_delta_bottom,
-            { "order_bounds_delta_bottom", "rdp.order_bounds_delta_bottom", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "delta_bottom", "rdp.order_bounds_delta_bottom", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
         { &hf_ts_order_bounds_left,
-            { "order_bounds_left", "rdp.order_bounds_left", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "left", "rdp.order_bounds_left", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_bounds_top,
-            { "order_bounds_top", "rdp.order_bounds_top", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "top", "rdp.order_bounds_top", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_bounds_right,
-            { "order_bounds_right", "rdp.order_bounds_right", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "right", "rdp.order_bounds_right", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_bounds_bottom,
-            { "order_bounds_bottom", "rdp.order_bounds_bottom", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "bottom", "rdp.order_bounds_bottom", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
+        // order, rectangle
         { &hf_ts_order_delta_left,
             { "nLeftRect Delta", "rdp.order_delta_left", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_delta_top,
@@ -2661,6 +3029,7 @@ proto_register_rdp(void)
         { &hf_ts_order_height,
             { "nHeight", "rdp.order_height", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
+        // order, src coordinate
         { &hf_ts_order_delta_src_x,
             { "nXSrc Delta", "rdp.order_delta_src_x", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_delta_src_y,
@@ -2670,6 +3039,83 @@ proto_register_rdp(void)
             { "nXSrc", "rdp.order_src_x", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_src_y,
             { "nYSrc", "rdp.order_src_y", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        // order, background rectangle
+        { &hf_ts_order_bk_delta_left,
+            { "BkLeft Delta", "rdp.order_bk_delta_left", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bk_delta_top,
+            { "BkTop Delta", "rdp.order_bk_delta_top", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bk_delta_right,
+            { "BkRight Delta", "rdp.order_bk_delta_right", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bk_delta_bottom,
+            { "BkBottom Delta", "rdp.order_bk_delta_bottom", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_bk_left,
+            { "BkLeft", "rdp.order_bk_left", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bk_top,
+            { "BkTop", "rdp.order_bk_top", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bk_right,
+            { "BkRight", "rdp.order_bk_right", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_bk_bottom,
+            { "BkBottom", "rdp.order_bk_bottom", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        // order, opaque rectangle
+        { &hf_ts_order_op_delta_left,
+            { "OpLeft Delta", "rdp.order_op_delta_left", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_op_delta_top,
+            { "OpTop Delta", "rdp.order_op_delta_top", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_op_delta_right,
+            { "OpRight Delta", "rdp.order_op_delta_right", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_op_delta_bottom,
+            { "OpBottom Delta", "rdp.order_op_delta_bottom", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_op_left,
+            { "OpLeft", "rdp.order_op_left", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_op_top,
+            { "OpTop", "rdp.order_op_top", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_op_right,
+            { "OpRight", "rdp.order_op_right", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_op_bottom,
+            { "OpBottom", "rdp.order_op_bottom", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        // order, brush
+        { &hf_ts_order_brush_x,
+            { "order_brush_x", "rdp.order_brush_x", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_brush_y,
+            { "order_brush_y", "rdp.order_brush_y", FT_INT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_brush_style,
+            { "order_brush_style", "rdp.order_brush_style", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_brush_hatch,
+            { "order_brush_hatch", "rdp.order_brush_hatch", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_brush_extra,
+            { "order_brush_extra", "rdp.order_brush_extra", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
+        // order, brush
+        { &hf_ts_order_binary_raster_operation,
+            { "binary raster operation", "rdp.order_binary_raster_operation", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_ternary_raster_operation,
+            { "ternary raster operation", "rdp.order_ternary_raster_operation", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+
+        // order, delta encoded rectangles
+        { &hf_ts_delta_encoded_rectangles_field_left,
+            { "delta_encoded_rectangles_field_left", "rdp.delta_encoded_rectangles_field_left", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_delta_encoded_rectangles_field_top,
+            { "delta_encoded_rectangles_field_top", "rdp.delta_encoded_rectangles_field_top", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_delta_encoded_rectangles_field_width,
+            { "delta_encoded_rectangles_field_width", "rdp.delta_encoded_rectangles_field_width", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_delta_encoded_rectangles_field_height,
+            { "delta_encoded_rectangles_field_height", "rdp.delta_encoded_rectangles_field_height", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        // order, delta encoded points
+        { &hf_ts_delta_encoded_points_field_x,
+            { "delta_encoded_points_field_x", "rdp.delta_encoded_points_field_x", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_delta_encoded_points_field_y,
+            { "delta_encoded_points_field_y", "rdp.delta_encoded_points_field_y", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        // order, color
+        { &hf_ts_order_back_color,
+            { "BackColor", "rdp.order_back_color", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_fore_color,
+            { "ForeColor", "rdp.order_fore_color", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
 
 
 	};
