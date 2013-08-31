@@ -2404,6 +2404,56 @@ dissect_order_fast_glyph(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tre
 // FastGlyph same as FastGlyph in structure
 #define dissect_order_fast_index dissect_order_fast_glyph
 
+// -------------------- alternate secondary -------------------------------------------------
+gint hf_ts_order_altsec_frame_marker_action = -1;
+gint hf_ts_order_bitmap_id = -1;
+gint hf_ts_order_altsec_offscreen_bitmap_cx = -1;
+gint hf_ts_order_altsec_offscreen_bitmap_cy = -1;
+gint hf_ts_order_altsec_offscreen_bitmap_num_indices = -1;
+gint hf_ts_order_altsec_offscreen_bitmap_indices = -1;
+
+static gint32
+dissect_order_altsec_create_offsrceen_bitmap(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    guint16 flags;
+    guint16 num_indices;
+
+    flags = tvb_get_letohs(tvb, offset);
+    
+    proto_tree_add_bits_item(tree, hf_ts_order_bitmap_id, tvb, offset * 8, 15, ENC_LITTLE_ENDIAN);
+    offset += 2;
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_offscreen_bitmap_cx, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    offset += 2;
+    proto_tree_add_item(tree, hf_ts_order_altsec_offscreen_bitmap_cy, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    offset += 2;
+
+    if (flags & 0x8000)
+    {
+        num_indices = tvb_get_letohs(tvb, offset);
+        proto_tree_add_item(tree, hf_ts_order_altsec_offscreen_bitmap_num_indices, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+
+        proto_tree_add_item(tree, hf_ts_order_altsec_offscreen_bitmap_indices, tvb, offset, 2 * num_indices, ENC_NA);
+        offset += 2 * num_indices; // Each index is a 16-bit unsigned integer
+    }
+
+}
+
+static gint32
+dissect_order_altsec_switch_surface(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    proto_tree_add_item(tree, hf_ts_order_bitmap_id, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    offset += 2;
+}
+
+static gint32
+dissect_order_altsec_frame_marker(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    proto_tree_add_item(tree, hf_ts_order_altsec_frame_marker_action, tvb, offset, 4, ENC_LITTLE_ENDIAN);
+    offset += 4;
+}
+
 static void
 dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, guint16 number_orders, primary_drawing_order_info_t *state)
 {
@@ -2588,13 +2638,34 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
         {
             order_type = control_flags >> 2;
 
+            // TODO: frame marker, create offscreen bitmap, switch surface
+
             order_item = proto_tree_add_item(tree, hf_ts_alternate_secondary_drawing_order, tvb, order_offset, -1, ENC_NA);
+            order_tree = proto_item_add_subtree(order_item, ett_ts_alternate_secondary_drawing_order);
             proto_item_set_text(order_item, "%s", val_to_str(order_type, alternate_secondary_drawing_order_types, "Unknown %d"));
-            return ;// TODO: could not dissect
+
+            switch (order_type)
+            {
+                case TS_ALTSEC_SWITCH_SURFACE:
+                    dissect_order_altsec_switch_surface(tvb, pinfo, order_tree);
+                    break;
+
+                case TS_ALTSEC_CREATE_OFFSCR_BITMAP:
+                    dissect_order_altsec_create_offsrceen_bitmap(tvb, pinfo, order_tree);
+                    break;
+
+                case TS_ALTSEC_FRAME_MARKER:
+                    dissect_order_altsec_frame_marker(tvb, pinfo, order_tree);
+                    break;
+
+                default:
+                    return;// TODO: could not dissect
+            }
+
+            proto_item_set_len(order_item, offset - order_offset); // know length till dissect completely
         }
     }
 }
-
 
 static gint32
 dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
@@ -3066,18 +3137,31 @@ proto_register_rdp(void)
 
         // order, cache id
         { &hf_ts_order_cache_id,
-            { "order_cache_id", "rdp.order_cache_id", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "cacheId", "rdp.order_cache_id", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
         // order, glyph x y
         { &hf_ts_order_x,
-            { "order_x", "rdp.order_x", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "X", "rdp.order_x", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_y,
-            { "order_y", "rdp.order_y", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "Y", "rdp.order_y", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
         // order, variable_bytes
         { &hf_ts_order_variable_bytes,
-            { "order_variable_bytes", "rdp.order_variable_bytes", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+            { "VariableBytes", "rdp.order_variable_bytes", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 
+        // order, altsec
+        { &hf_ts_order_bitmap_id,
+            { "bitmapId", "rdp.order_bitmap_id", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_offscreen_bitmap_cx,
+            { "cx", "rdp.order_altsec_offscreen_bitmap_cx", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_offscreen_bitmap_cy,
+            { "cy", "rdp.order_altsec_offscreen_bitmap_cy", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_offscreen_bitmap_num_indices,
+            { "cIndices", "rdp.order_altsec_offscreen_bitmap_num_indices", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_offscreen_bitmap_indices,
+            { "indices", "rdp.order_altsec_offscreen_bitmap_indices", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_frame_marker_action,
+            { "action", "rdp.order_altsec_frame_marker_action", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
 	};
 
@@ -3097,6 +3181,7 @@ proto_register_rdp(void)
         &ett_ts_order_data,
         &ett_ts_primary_drawing_order,
         &ett_ts_primary_drawing_order_bounds,
+        &ett_ts_alternate_secondary_drawing_order,
 	};
 
     module_t *rdp_module;
