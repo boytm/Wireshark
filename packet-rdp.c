@@ -117,6 +117,7 @@ static int hf_ts_client_info_pdu_working_dir = -1;
 
 
 static gint ett_rdp = -1;
+static gint ett_ts_demand_active_pdu = -1;
 static gint ett_ts_confirm_active_pdu = -1;
 static gint ett_ts_capability_sets = -1;
 static gint ett_ts_caps_set = -1;
@@ -636,7 +637,7 @@ dissect_ts_demand_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 		numberCapabilities = tvb_get_letohs(tvb, offset + 8 + lengthSourceDescriptor);
 
 		ti = proto_tree_add_item(tree, hf_ts_demand_active_pdu, tvb, ts_demand_active_pdu_offset, -1, TRUE);
-		ts_demand_active_pdu_tree = proto_item_add_subtree(ti, ett_ts_confirm_active_pdu);
+		ts_demand_active_pdu_tree = proto_item_add_subtree(ti, ett_ts_demand_active_pdu);
 
 		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_shareid, tvb, offset, 4, TRUE);
 		proto_tree_add_item(ts_demand_active_pdu_tree, hf_ts_confirm_active_pdu_length_source_descriptor, tvb, offset + 4, 2, TRUE);
@@ -2780,163 +2781,6 @@ dissect_rdp(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 }
 
 void
-proto_register_ts_caps_set(void)
-{
-	static hf_register_info hf[] =
-	{
-		{ &hf_ts_caps_set_capability_set_type,
-		  { "capabilitySetType", "rdp.capset_type", FT_UINT16, BASE_DEC, VALS(capability_set_types), 0x0, NULL, HFILL } },
-		{ &hf_ts_caps_set_length_capability,
-		  { "lengthCapability", "rdp.capset_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_caps_set_capability_data,
-		  { "capabilityData", "rdp.capset_data", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
-	};
-
-	static gint *ett[] = {
-		&ett_ts_caps_set
-	};
-
-	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
-}
-
-void
-proto_register_ts_capability_sets(void)
-{
-	static hf_register_info hf[] =
-	{
-		{ &hf_ts_caps_set,
-		  { "capabilitySet", "rdp.capset", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
-	};
-
-	static gint *ett[] = {
-		&ett_ts_capability_sets
-	};
-
-	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
-}
-
-void
-proto_register_ts_input_events(void)
-{
-	static hf_register_info hf[] =
-	{
-		{ &hf_ts_input_event,
-		  { "inputEvent", "rdp.input_event", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
-	};
-
-	static gint *ett[] = {
-		&ett_ts_input_events
-	};
-
-	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
-}
-
-void
-proto_register_ts_output_updates(void)
-{
-	static hf_register_info hf[] =
-	{
-		{ &hf_ts_output_update,
-		  { "outputUpdate", "rdp.output_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
-	};
-
-	static gint *ett[] = {
-		&ett_ts_output_updates
-	};
-
-	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
-}
-
-void
-proto_register_ts_server_security_data(void)
-{
-	static hf_register_info hf[] =
-	{
-		{ &hf_ts_server_security_encryption_method,
-		  { "serverSecurityEncryptionMethod", "rdp.server_enc_method", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_server_security_encryption_level,
-		  { "serverSecurityEncryptionLevel", "rdp.server_enc_level", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_server_public_key_modulus,
-		  { "serverPublicKeyModulus", "rdp.server_modulus", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_server_public_key_exponent,
-		  { "serverPublicKeyExponent", "rdp.server_exponent", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_server_proprietary_certificate_signature,
-		  { "serverProprietaryCertificateSignature", "rdp.server_signature", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-	};
-
-	static gint *ett[] = {
-		&ett_ts_server_secutiry_data
-	};
-
-	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
-
-}
-
-void
-proto_register_mcs_connect_response_pdu(void)
-{
-	static hf_register_info hf[] =
-	{
-		{ &hf_mcs_connect_response_pdu_server_core_data,
-		  { "serverCoreData", "rdp.server_core", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_mcs_connect_response_pdu_server_network_data,
-		  { "serverNetworkData", "rdp.server_network", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_mcs_connect_response_pdu_server_security_data,
-		  { "serverSecurityData", "rdp.server_security", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_mcs_connect_response_pdu_server_message_channel_data,
-		  { "serverMessageChannelData", "rdp.server_message_channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_mcs_connect_response_pdu_server_multitransport_channel_data,
-		  { "serverMultitransportChannelData", "rdp.server_multi_channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-	};
-
-	static gint *ett[] = {
-		&ett_mcs_connect_response_pdu
-	};
-
-	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
-
-}
-
-void
-proto_register_ts_confirm_active_pdu(void)
-{
-	static hf_register_info hf[] =
-	{
-		{ &hf_ts_confirm_active_pdu_shareid,
-		  { "shareId", "rdp.shareid", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_confirm_active_pdu_originatorid,
-		  { "originatorId", "rdp.originatorid", FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_confirm_active_pdu_length_source_descriptor,
-		  { "lengthSourceDescriptor", "rdp.len_src_desc", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_confirm_active_pdu_length_combined_capabilities,
-		  { "lengthCombinedCapabilities", "rdp.caplen", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_confirm_active_pdu_source_descriptor,
-		  { "sourceDescriptor", "rdp.src_desc", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_confirm_active_pdu_number_capabilities,
-		  { "numberCapabilities", "rdp.capnum", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_confirm_active_pdu_pad2octets,
-		  { "pad2Octets", "rdp.pad2octets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_capability_sets,
-		  { "capabilitySets", "rdp.capsets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
-		{ &hf_ts_demand_active_pdu_sessionid,
-		  { "sessionId", "rdp.demand_active_pdu_sessionid", FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } }
-	};
-
-	static gint *ett[] = {
-		&ett_ts_confirm_active_pdu
-	};
-
-	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett)); // tree id is used to expanded/collapsed state of the subtree
-}
-
-void
 proto_register_rdp(void)
 {
 	module_t *module_rdp;
@@ -2979,6 +2823,31 @@ proto_register_rdp(void)
 		  { "Server Graphics Update PDU", "rdp.sp_graphics_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_server_slowpath_pointer_update,
 		  { "Server Pointer Update PDU", "rdp.sp_pointer_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
+        // Server MCS Connect Response PDU
+		{ &hf_mcs_connect_response_pdu_server_core_data,
+		  { "serverCoreData", "rdp.server_core", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_network_data,
+		  { "serverNetworkData", "rdp.server_network", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_security_data,
+		  { "serverSecurityData", "rdp.server_security", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_message_channel_data,
+		  { "serverMessageChannelData", "rdp.server_message_channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_multitransport_channel_data,
+		  { "serverMultitransportChannelData", "rdp.server_multi_channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
+        // Server Security Data (TS_UD_SC_SEC1) 
+		{ &hf_ts_server_security_encryption_method,
+		  { "serverSecurityEncryptionMethod", "rdp.server_enc_method", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_security_encryption_level,
+		  { "serverSecurityEncryptionLevel", "rdp.server_enc_level", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_public_key_modulus,
+		  { "serverPublicKeyModulus", "rdp.server_modulus", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_public_key_exponent,
+		  { "serverPublicKeyExponent", "rdp.server_exponent", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_proprietary_certificate_signature,
+		  { "serverProprietaryCertificateSignature", "rdp.server_signature", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
         // Client Info PDU
         { &hf_ts_client_info_pdu_codepage,
             { "codepage", "rdp.client_info_pdu_codepage", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
@@ -3005,6 +2874,44 @@ proto_register_rdp(void)
             { "alternate_shell", "rdp.client_info_pdu_alternate_shell", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_client_info_pdu_working_dir,
             { "working_dir", "rdp.client_info_pdu_working_dir", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+
+        //  Confirm Active PDU Data (TS_CONFIRM_ACTIVE_PDU) 
+		{ &hf_ts_confirm_active_pdu_shareid,
+		  { "shareId", "rdp.shareid", FT_UINT32, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_confirm_active_pdu_originatorid,
+		  { "originatorId", "rdp.originatorid", FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_confirm_active_pdu_length_source_descriptor,
+		  { "lengthSourceDescriptor", "rdp.len_src_desc", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_confirm_active_pdu_length_combined_capabilities,
+		  { "lengthCombinedCapabilities", "rdp.caplen", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_confirm_active_pdu_source_descriptor,
+		  { "sourceDescriptor", "rdp.src_desc", FT_STRING, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_confirm_active_pdu_number_capabilities,
+		  { "numberCapabilities", "rdp.capnum", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_confirm_active_pdu_pad2octets,
+		  { "pad2Octets", "rdp.pad2octets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_capability_sets,
+		  { "capabilitySets", "rdp.capsets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_demand_active_pdu_sessionid,
+		  { "sessionId", "rdp.demand_active_pdu_sessionid", FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } }
+
+        // input
+		{ &hf_ts_input_event,
+		  { "inputEvent", "rdp.input_event", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+        // output
+		{ &hf_ts_output_update,
+		  { "outputUpdate", "rdp.output_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+
+        // Capability Set (TS_CAPS_SET) 
+		{ &hf_ts_caps_set,
+		  { "capabilitySet", "rdp.capset", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		{ &hf_ts_caps_set_capability_set_type,
+		  { "capabilitySetType", "rdp.capset_type", FT_UINT16, BASE_DEC, VALS(capability_set_types), 0x0, NULL, HFILL } },
+		{ &hf_ts_caps_set_length_capability,
+		  { "lengthCapability", "rdp.capset_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_caps_set_capability_data,
+		  { "capabilityData", "rdp.capset_data", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+
         // order
         { &hf_ts_order_data,
             { "orderData", "rdp.order_data", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
@@ -3152,7 +3059,17 @@ proto_register_rdp(void)
 
 	static gint *ett[] = {
 		&ett_rdp,
+		&ett_mcs_connect_response_pdu,
+		&ett_ts_server_secutiry_data,
         &ett_ts_client_info_pdu,
+		&ett_ts_demand_active_pdu,
+		&ett_ts_confirm_active_pdu,
+		&ett_ts_capability_sets,
+		&ett_ts_caps_set,
+
+		&ett_ts_input_events,
+		&ett_ts_output_updates,
+
         &ett_ts_order_data,
         &ett_ts_primary_drawing_order,
         &ett_ts_primary_drawing_order_bounds,
@@ -3164,11 +3081,7 @@ proto_register_rdp(void)
 	register_dissector("rdp", dissect_rdp, proto_rdp);
 
 	proto_register_field_array(proto_rdp, hf, array_length(hf));
-	proto_register_subtree_array(ett, array_length(ett));
-    proto_register_mcs_connect_response_pdu();
-    proto_register_ts_server_security_data();
-    proto_register_ts_input_events();
-    proto_register_ts_output_updates();
+	proto_register_subtree_array(ett, array_length(ett));// tree id is used to expanded/collapsed state of the subtree
 
     rdp_module = prefs_register_protocol(proto_rdp, NULL);
     prefs_register_bool_preference(rdp_module, "order_detail",
