@@ -49,6 +49,8 @@ gint ts_caps_set_offset = 0;
 //gint order_offset = 0;
 
 int proto_rdp = -1;
+static gboolean enable_order_dissector = TRUE;
+
 static int hf_rdp_rdp = -1;
 static int hf_rdp_tpkt = -1;
 static int hf_rdp_x224 = -1;
@@ -2262,6 +2264,30 @@ dissect_order_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, g
 
 }
 
+static int 
+dissect_order_mem3blt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 0x0001)
+    {
+        offset += 2;
+        //in_uint8(s, self->state.memblt_cache_id);
+        //in_uint8(s, self->state.memblt_color_table);
+    }
+
+    dissect_order_destination_rect(tvb, pinfo, tree, present >> 1, delta_coordinates);
+    dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 5);
+    dissect_order_src_coordinate(tvb, pinfo, tree, present >> 6, delta_coordinates);
+    dissect_order_back_fore_color(tvb, pinfo, tree, present >> 8);
+    dissect_order_brush(tvb, pinfo, tree, present >> 10);
+
+    if (present & 0x8000)
+    {
+        offset += 2;
+        //in_uint16_le(s, self->state.memblt_cache_idx);
+    }
+
+}
+
 
 
 static int 
@@ -2389,7 +2415,11 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
     guint16 idx;
 
     const guint8 order_type_mask = TS_STANDARD | TS_SECONDARY;
-// primary drawing order, alternate secondary drawing order hard to extract length
+
+    if (!enable_order_dissector)
+        return;
+
+    // primary drawing order, alternate secondary drawing order hard to extract length
 
     proto_tree *tree = proto_item_add_subtree(item, ett_ts_order_data);
     for (idx = 0; idx < number_orders; ++idx)
@@ -3128,6 +3158,8 @@ proto_register_rdp(void)
         &ett_ts_primary_drawing_order_bounds,
 	};
 
+    module_t *rdp_module;
+
 	proto_rdp = proto_register_protocol("Remote Desktop Protocol", "RDP", "rdp");
 	register_dissector("rdp", dissect_rdp, proto_rdp);
 
@@ -3137,6 +3169,13 @@ proto_register_rdp(void)
     proto_register_ts_server_security_data();
     proto_register_ts_input_events();
     proto_register_ts_output_updates();
+
+    rdp_module = prefs_register_protocol(proto_rdp, NULL);
+    prefs_register_bool_preference(rdp_module, "order_detail",
+        "Show order detail",
+        "Whether the order should be dissect according to [RDPEGDI]",
+        &enable_order_dissector);
+
 	module_rdp = prefs_register_protocol( proto_rdp, proto_reg_handoff_rdp);
 }
 
