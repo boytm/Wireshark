@@ -1701,6 +1701,7 @@ gint hf_ts_order_src_y = -1;
 gint ett_ts_order_data = -1;
 gint ett_ts_primary_drawing_order = -1;
 gint ett_ts_primary_drawing_order_bounds = -1;
+gint ett_ts_alternate_secondary_drawing_order = -1;
 
 static int 
 dissect_order_bounds(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
@@ -2039,7 +2040,7 @@ inline void dissect_order_variable_bytes(tvbuff_t *tvb, packet_info *pinfo _U_ ,
         guint8 length = tvb_get_guint8(tvb, offset++);
         offset += length;
 
-        proto_tree_add_item(tree, hf_ts_order_variable_bytes, tvb, start, offset - start ENC_NA);
+        proto_tree_add_item(tree, hf_ts_order_variable_bytes, tvb, start, offset - start, ENC_NA);
     }
 }
 
@@ -2050,23 +2051,28 @@ gint hf_ts_delta_encoded_rectangles_field_height = -1;
 gint hf_ts_delta_encoded_points_field_x = -1;
 gint hf_ts_delta_encoded_points_field_y = -1;
 
+#define BITS_TO_SIGNED(this, sign_bit, mask) ((this & sign_bit) ? this | (~mask) : this & mask)
+#define BITS_TO_SIGNED_7(this) BITS_TO_SIGNED(this, 0x40, 0x3F)
+#define BITS_TO_SIGNED_15(this) BITS_TO_SIGNED(this, 0x4000, 0x3FFF)
+
 inline void parse_rectangle(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
-    guint8 first_encoding_byte;
+    guint32 encoding_bytes;
 
 #define DELTA_ENCODED_RECTANGLES_FIELD(mask, hf_index) \
-    first_encoding_byte = tvb_get_guint8(tvb, offset); \
-    if (present & mask) \
+    encoding_bytes = tvb_get_guint8(tvb, offset); \
+    if (!(present & mask)) \
     { \
          \
-        if (first_encoding_byte & 0x80) \
+        if (encoding_bytes & 0x80) \
         { \
-            proto_tree_add_bits_item(tree, hf_index, tvb, offset * 8 + 1, 15, ENC_BIG_ENDIAN); \
+            encoding_bytes = tvb_get_ntohs(tvb, offset); \
+            proto_tree_add_int(tree, hf_index, tvb, offset, 2, BITS_TO_SIGNED(encoding_bytes, 0x4000, 0x3FFF)); \
             offset += 2; \
         } \
         else \
         { \
-            proto_tree_add_bits_item(tree, hf_index, tvb, offset * 8 + 1, 7, ENC_BIG_ENDIAN); \
+            proto_tree_add_int(tree, hf_index, tvb, offset, 1, BITS_TO_SIGNED(encoding_bytes, 0x40, 0x3F)); \
             offset += 1; \
         } \
     } \
@@ -2083,7 +2089,7 @@ inline void parse_rectangle(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *
 
 inline void parse_point(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
-    guint8 first_encoding_byte;
+    guint32 encoding_bytes;
 
     // x
     DELTA_ENCODED_RECTANGLES_FIELD(2, hf_ts_delta_encoded_points_field_x);
@@ -2458,6 +2464,7 @@ static void
 dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, guint16 number_orders, primary_drawing_order_info_t *state)
 {
     proto_item *ti;
+    proto_tree *tree;
     proto_tree *subtree;
     proto_item *order_item;
     proto_tree *order_tree;
@@ -2475,7 +2482,7 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
 
     // primary drawing order, alternate secondary drawing order hard to extract length
 
-    proto_tree *tree = proto_item_add_subtree(item, ett_ts_order_data);
+    tree = proto_item_add_subtree(item, ett_ts_order_data);
     for (idx = 0; idx < number_orders; ++idx)
     {
         ti = NULL;
@@ -2577,7 +2584,7 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
                     dissect_order_multi_patblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
                     break;
 
-                case TS_ENC_SCRBLT_ORDER: // srcblt
+                case TS_ENC_SCRBLT_ORDER: // scrblt
                     dissect_order_srcblt(tvb, pinfo, order_tree, field_flags, delta_coordinates);
                     break;
 
@@ -2975,24 +2982,24 @@ proto_register_rdp(void)
 		{ &hf_ts_capability_sets,
 		  { "capabilitySets", "rdp.capsets", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_demand_active_pdu_sessionid,
-		  { "sessionId", "rdp.demand_active_pdu_sessionid", FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } }
+		  { "sessionId", "rdp.demand_active_pdu_sessionid", FT_UINT32, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
         // input
 		{ &hf_ts_input_event,
-		  { "inputEvent", "rdp.input_event", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "inputEvent", "rdp.input_event", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         // output
 		{ &hf_ts_output_update,
-		  { "outputUpdate", "rdp.output_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "outputUpdate", "rdp.output_update", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 
         // Capability Set (TS_CAPS_SET) 
 		{ &hf_ts_caps_set,
-		  { "capabilitySet", "rdp.capset", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "capabilitySet", "rdp.capset", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_caps_set_capability_set_type,
 		  { "capabilitySetType", "rdp.capset_type", FT_UINT16, BASE_DEC, VALS(capability_set_types), 0x0, NULL, HFILL } },
 		{ &hf_ts_caps_set_length_capability,
 		  { "lengthCapability", "rdp.capset_len", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_caps_set_capability_data,
-		  { "capabilityData", "rdp.capset_data", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "capabilityData", "rdp.capset_data", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 
         // order
         { &hf_ts_order_data,
