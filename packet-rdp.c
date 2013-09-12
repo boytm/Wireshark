@@ -1158,7 +1158,7 @@ static void dissect_mcs_connect_response(tvbuff_t *tvb, packet_info *pinfo _U_ ,
 
     len = parse_per_length(tvb);
 
-    if(tvb_length_remaining(tvb, offset) >= len)
+    if(tvb_length_remaining(tvb, offset) >= (int)len)
     {
 		mcs_connect_response_pdu_tree = proto_item_add_subtree(ti, ett_mcs_connect_response_pdu);
 
@@ -1949,6 +1949,7 @@ dissect_order_ternary_raster_operation(tvbuff_t *tvb, packet_info *pinfo _U_ , p
     }
 }
 
+
 inline void dissect_order_src_x(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     if (present & 1)
@@ -1991,6 +1992,7 @@ inline void dissect_order_back_fore_color(tvbuff_t *tvb, packet_info *pinfo _U_ 
 }
 
 gint hf_ts_order_cache_id = -1;
+gint hf_ts_order_cache_index = -1;
 
 inline void dissect_order_cache_id_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
@@ -2011,21 +2013,41 @@ inline void dissect_order_cache_id_glyph(tvbuff_t *tvb, packet_info *pinfo _U_ ,
     }
 }
 
-gint hf_ts_order_x = -1;
-gint hf_ts_order_y = -1;
-
-inline void dissect_order_x_y(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+inline int 
+dissect_order_cache_id(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
     if (present & 1)
     {
-        proto_tree_add_item(tree, hf_ts_order_x, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        proto_tree_add_item(tree, hf_ts_order_cache_id, tvb, offset, 2, ENC_LITTLE_ENDIAN);
         offset += 2;
+    }
+}
+
+inline int 
+dissect_order_cache_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
+{
+    if (present & 1)
+    {
+        proto_tree_add_item(tree, hf_ts_order_cache_index, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+    }
+}
+
+gint hf_ts_order_x = -1;
+gint hf_ts_order_y = -1;
+gint hf_ts_order_delta_x = -1;
+gint hf_ts_order_delta_y = -1;
+
+inline void dissect_order_x_y(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    if (present & 1)
+    {
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_x, hf_ts_order_delta_x, delta_coordinates);
     }
 
     if (present & 2)
     {
-        proto_tree_add_item(tree, hf_ts_order_y, tvb, offset, 2, ENC_LITTLE_ENDIAN);
-        offset += 2;
+        dissect_order_coordinate(tvb, pinfo, tree, hf_ts_order_y, hf_ts_order_delta_y, delta_coordinates);
     }
 }
 
@@ -2309,47 +2331,23 @@ dissect_order_multi_srcblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 static int 
 dissect_order_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
-    if (present & 0x0001)
-    {
-        offset += 2;
-        //in_uint8(s, self->state.memblt_cache_id);
-        //in_uint8(s, self->state.memblt_color_table);
-    }
-
+    dissect_order_cache_id(tvb, pinfo, tree, present);
     dissect_order_destination_rect(tvb, pinfo, tree, present >> 1, delta_coordinates);
     dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 5);
     dissect_order_src_coordinate(tvb, pinfo, tree, present >> 6, delta_coordinates);
-
-    if (present & 0x0100)
-    {
-        offset += 2;
-        //in_uint16_le(s, self->state.memblt_cache_idx);
-    }
-
+    dissect_order_cache_index(tvb, pinfo, tree, present >> 8);
 }
 
 static int 
 dissect_order_mem3blt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
-    if (present & 0x0001)
-    {
-        offset += 2;
-        //in_uint8(s, self->state.memblt_cache_id);
-        //in_uint8(s, self->state.memblt_color_table);
-    }
-
+    dissect_order_cache_id(tvb, pinfo, tree, present);
     dissect_order_destination_rect(tvb, pinfo, tree, present >> 1, delta_coordinates);
     dissect_order_ternary_raster_operation(tvb, pinfo, tree, present >> 5);
     dissect_order_src_coordinate(tvb, pinfo, tree, present >> 6, delta_coordinates);
     dissect_order_back_fore_color(tvb, pinfo, tree, present >> 8);
     dissect_order_brush(tvb, pinfo, tree, present >> 10);
-
-    if (present & 0x8000)
-    {
-        offset += 2;
-        //in_uint16_le(s, self->state.memblt_cache_idx);
-    }
-
+    dissect_order_cache_index(tvb, pinfo, tree, present >> 8);
 }
 
 
@@ -2383,15 +2381,16 @@ dissect_order_glyph_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tr
     dissect_order_text_background_rect(tvb, pinfo, tree, present >> 6, 0);
     dissect_order_opaque_rect(tvb, pinfo, tree, present >> 10, 0);
     dissect_order_brush(tvb, pinfo, tree, present >> 14);
-    dissect_order_x_y(tvb, pinfo, tree, present >> 19);
+    dissect_order_x_y(tvb, pinfo, tree, present >> 19, 0);
     dissect_order_variable_bytes(tvb, pinfo, tree, present >> 21);
 }
 
 
+// a single glyph
+// FastGlyph same as FastIndex in structure, except X, Y are variable
 static int 
 dissect_order_fast_glyph(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
-
     dissect_order_cache_id_glyph(tvb, pinfo, tree, present);
 
     if (present & 0x000002)
@@ -2401,14 +2400,29 @@ dissect_order_fast_glyph(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tre
 
     dissect_order_back_fore_color(tvb, pinfo, tree, present >> 2);
     dissect_order_text_background_rect(tvb, pinfo, tree, present >> 4, delta_coordinates);
-    // Notice: OpTop field has some special meaning
+    /* Notice: OpTop field has some special meaning */
     dissect_order_opaque_rect(tvb, pinfo, tree, present >> 8, delta_coordinates);
-    dissect_order_x_y(tvb, pinfo, tree, present >> 12);
+    dissect_order_x_y(tvb, pinfo, tree, present >> 12, delta_coordinates); // difference with fast index
     dissect_order_variable_bytes(tvb, pinfo, tree, present >> 14);
 }
 
-// FastGlyph same as FastGlyph in structure
-#define dissect_order_fast_index dissect_order_fast_glyph
+static void
+dissect_order_fast_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
+{
+    dissect_order_cache_id_glyph(tvb, pinfo, tree, present);
+
+    if (present & 0x000002)
+    {
+        offset += 2; // fDrawing 
+    }
+
+    dissect_order_back_fore_color(tvb, pinfo, tree, present >> 2);
+    dissect_order_text_background_rect(tvb, pinfo, tree, present >> 4, delta_coordinates);
+    /* Notice: OpTop field has some special meaning */
+    dissect_order_opaque_rect(tvb, pinfo, tree, present >> 8, delta_coordinates);
+    dissect_order_x_y(tvb, pinfo, tree, present >> 12, 0); // difference with fast glyph
+    dissect_order_variable_bytes(tvb, pinfo, tree, present >> 14);
+}
 
 // -------------------- alternate secondary -------------------------------------------------
 gint hf_ts_order_altsec_frame_marker_action = -1;
@@ -2458,6 +2472,84 @@ dissect_order_altsec_frame_marker(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_
 {
     proto_tree_add_item(tree, hf_ts_order_altsec_frame_marker_action, tvb, offset, 4, ENC_LITTLE_ENDIAN);
     offset += 4;
+}
+
+#define STREAM_BITMAP_END 0x01 
+#define STREAM_BITMAP_COMPRESSED 0x02 
+#define STREAM_BITMAP_REV2 0x04 
+
+
+gint hf_ts_order_altsec_bitmap_flags = -1;
+gint hf_ts_order_altsec_bitmap_bpp = -1;
+gint hf_ts_order_altsec_bitmap_type = -1;
+gint hf_ts_order_altsec_bitmap_width = -1;
+gint hf_ts_order_altsec_bitmap_height = -1;
+gint hf_ts_order_altsec_bitmap_size = -1;
+gint hf_ts_order_altsec_bitmap_block_size = -1;
+gint hf_ts_order_altsec_bitmap_block = -1;
+
+static void
+dissect_order_altsec_stream_bitmap_first(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    guint8 bitmap_flags;
+    guint8 bitmap_bpp;
+    guint16 bitmap_type;
+    guint16 bitmap_block_size;
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_flags, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+    bitmap_flags = tvb_get_guint8(tvb, offset++);
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_bpp, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+    bitmap_bpp = tvb_get_guint8(tvb, offset++);
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_type, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    bitmap_type = tvb_get_letohs(tvb, offset);
+    offset += 2;
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_width, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    offset += 2;
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_height, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    offset += 2;
+
+    if (bitmap_flags & STREAM_BITMAP_REV2)
+    {
+        proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_size, tvb, offset, 4, ENC_LITTLE_ENDIAN);
+        offset += 4;
+    }
+    else
+    {
+        proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_size, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+        offset += 2;
+    }
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_block_size, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    bitmap_block_size = tvb_get_letohs(tvb, offset);
+    offset += 2; 
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_block, tvb, offset, bitmap_block_size, ENC_NA);
+    offset += bitmap_block_size;
+}
+
+static void
+dissect_order_altsec_stream_bitmap_next(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    guint8 bitmap_flags;
+    guint16 bitmap_type;
+    guint16 bitmap_block_size;
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_flags, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+    bitmap_flags = tvb_get_guint8(tvb, offset++);
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_type, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    bitmap_type = tvb_get_letohs(tvb, offset);
+    offset += 2;
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_block_size, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    bitmap_block_size = tvb_get_letohs(tvb, offset);
+    offset += 2; 
+
+    proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_block, tvb, offset, bitmap_block_size, ENC_NA);
+    offset += bitmap_block_size;
 }
 
 static void
@@ -2538,7 +2630,11 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
             if (control_flags & TS_ZERO_FIELD_BYTE_BIT1)
                 size -= 2;
 
-            assert(!(size < 0 || size > 3));
+            if ((size < 0 || size > 3))
+            {
+                col_add_fstr(pinfo->cinfo, COL_INFO, "[Parse Error]");
+                return; // error
+            }
 
             proto_tree_add_item(order_tree, hf_ts_primary_drawing_order_field_flags, tvb, offset, size, ENC_LITTLE_ENDIAN);
 
@@ -2665,6 +2761,14 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
                     dissect_order_altsec_frame_marker(tvb, pinfo, order_tree);
                     break;
 
+                case TS_ALTSEC_STREAM_BITMAP_FIRST:
+                    dissect_order_altsec_stream_bitmap_first(tvb, pinfo, order_tree);
+                    break;
+
+                case TS_ALTSEC_STREAM_BITMAP_NEXT:
+                    dissect_order_altsec_stream_bitmap_next(tvb, pinfo, order_tree);
+                    break;
+
                 default:
                     return;// TODO: could not dissect
             }
@@ -2673,6 +2777,7 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
         }
     }
 }
+
 
 static gint32
 dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
@@ -3115,7 +3220,7 @@ proto_register_rdp(void)
         { &hf_ts_order_brush_extra,
             { "order_brush_extra", "rdp.order_brush_extra", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 
-        // order, brush
+        // order, raster operation
         { &hf_ts_order_binary_raster_operation,
             { "binary raster operation", "rdp.order_binary_raster_operation", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_ternary_raster_operation,
@@ -3142,15 +3247,21 @@ proto_register_rdp(void)
         { &hf_ts_order_fore_color,
             { "ForeColor", "rdp.order_fore_color", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 
-        // order, cache id
+        // order, memblt cache index
         { &hf_ts_order_cache_id,
             { "cacheId", "rdp.order_cache_id", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_cache_index,
+            { "cacheIndex", "rdp.order_cache_index", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
         // order, glyph x y
         { &hf_ts_order_x,
-            { "X", "rdp.order_x", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "X", "rdp.order_x", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_y,
-            { "Y", "rdp.order_y", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+            { "Y", "rdp.order_y", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_delta_x,
+            { "X Delta", "rdp.order_delta_x", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_delta_y,
+            { "Y Delta", "rdp.order_delta_y", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
 
         // order, variable_bytes
         { &hf_ts_order_variable_bytes,
@@ -3169,6 +3280,23 @@ proto_register_rdp(void)
             { "indices", "rdp.order_altsec_offscreen_bitmap_indices", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_order_altsec_frame_marker_action,
             { "action", "rdp.order_altsec_frame_marker_action", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
+        { &hf_ts_order_altsec_bitmap_flags,
+            { "BitmapFlags", "rdp.order_altsec_bitmap_flags", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_bitmap_bpp,
+            { "BitmapBpp", "rdp.order_altsec_bitmap_bpp", FT_UINT8, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_bitmap_type,
+            { "BitmapType", "rdp.order_altsec_bitmap_type", FT_UINT16, BASE_HEX, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_bitmap_width,
+            { "BitmapWidth", "rdp.order_altsec_bitmap_width", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_bitmap_height,
+            { "BitmapHeight", "rdp.order_altsec_bitmap_height", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_bitmap_size,
+            { "BitmapSize", "rdp.order_altsec_bitmap_size", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_bitmap_block_size,
+            { "BitmapBlockSize", "rdp.order_altsec_bitmap_block_size", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_altsec_bitmap_block,
+            { "BitmapBlock", "rdp.order_altsec_bitmap_block", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 
 	};
 
