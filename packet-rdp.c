@@ -1702,6 +1702,7 @@ gint ett_ts_order_data = -1;
 gint ett_ts_primary_drawing_order = -1;
 gint ett_ts_primary_drawing_order_bounds = -1;
 gint ett_ts_alternate_secondary_drawing_order = -1;
+gint ett_ts_primary_drawing_order_coded_delta_list = -1;
 
 static int 
 dissect_order_bounds(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
@@ -2066,6 +2067,8 @@ inline void dissect_order_variable_bytes(tvbuff_t *tvb, packet_info *pinfo _U_ ,
     }
 }
 
+gint hf_ts_order_coded_delta_list = -1;
+gint hf_ts_order_coded_delta_list_length = -1;
 gint hf_ts_delta_encoded_rectangles_field_left = -1;
 gint hf_ts_delta_encoded_rectangles_field_top = -1;
 gint hf_ts_delta_encoded_rectangles_field_width = -1;
@@ -2125,44 +2128,60 @@ inline void parse_point(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
 
 static int dissect_order_delta_encoded_rectangles(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
 {
+    proto_item *item;
+    proto_tree *coded_deta_list_tree;
+    gint coded_deta_list_offset = offset;
+    guint8 idx;
     guint8 flags;
     guint8 zero_bits_length = CEIL(delta_entries, 2);
-    gint zero_bits_offset = offset;
+    gint zero_bits_offset;
+
+    item = proto_tree_add_item(tree, hf_ts_order_coded_delta_list, tvb, offset, -1, ENC_NA);
+    coded_deta_list_tree = proto_item_add_subtree(item, ett_ts_primary_drawing_order_coded_delta_list);
+
+    proto_tree_add_item(coded_deta_list_tree, hf_ts_order_coded_delta_list_length, tvb, offset, 2, ENC_LITTLE_ENDIAN);
+    offset += 2; // 2 bytes length
+    zero_bits_offset = offset;
     offset += zero_bits_length;
 
-    for(; delta_entries > 0; --delta_entries)
+    for(idx = 0; idx < delta_entries; ++idx)
     {
-        flags = tvb_get_guint8(tvb, zero_bits_offset++);
+        if (idx % 2 == 0)
+            flags = tvb_get_guint8(tvb, zero_bits_offset++);
 
-        parse_rectangle(tvb, pinfo, tree, flags >> 4);
-
-        if (--delta_entries > 0)
-            parse_rectangle(tvb, pinfo, tree, flags);
+        parse_rectangle(tvb, pinfo, coded_deta_list_tree, flags >> 4 * (1 - idx % 2));
     }
+
+    proto_item_set_len(item, offset - coded_deta_list_offset);
 }
 
 static int dissect_order_delta_encoded_points(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
 {
+    proto_item *item;
+    proto_tree *coded_deta_list_tree;
+    gint coded_deta_list_offset = offset;
+    guint8 idx;
     guint8 flags;
     guint8 zero_bits_length = CEIL(delta_entries, 4);
-    gint zero_bits_offset = offset;
+    gint zero_bits_offset;
+
+    item = proto_tree_add_item(tree, hf_ts_order_coded_delta_list, tvb, offset, -1, ENC_NA);
+    coded_deta_list_tree = proto_item_add_subtree(item, ett_ts_primary_drawing_order_coded_delta_list);
+
+    proto_tree_add_item(coded_deta_list_tree, hf_ts_order_coded_delta_list_length, tvb, offset, 1, ENC_LITTLE_ENDIAN);
+    offset += 1; // 1 byte length
+    zero_bits_offset = offset;
     offset += zero_bits_length;
 
-    for(; delta_entries > 0; --delta_entries)
+    for(idx = 0; idx < delta_entries; ++idx)
     {
-        flags = tvb_get_guint8(tvb, zero_bits_offset++);
+        if (idx % 4 == 0)
+            flags = tvb_get_guint8(tvb, zero_bits_offset++);
 
-        parse_point(tvb, pinfo, tree, flags >> 6);
-
-        if (--delta_entries > 0)
-            parse_point(tvb, pinfo, tree, flags >> 4);
-
-        if (--delta_entries > 0)
-            parse_point(tvb, pinfo, tree, flags >> 2);
-
-        if (--delta_entries > 0)
-            parse_point(tvb, pinfo, tree, flags);
+        parse_point(tvb, pinfo, coded_deta_list_tree, flags >> 2 * (3 - idx % 4));
     }
+
+    proto_item_set_len(item, offset - coded_deta_list_offset);
 }
 
 static int 
@@ -3227,6 +3246,11 @@ proto_register_rdp(void)
             { "ternary raster operation", "rdp.order_ternary_raster_operation", FT_UINT8, BASE_HEX, NULL, 0x0, NULL, HFILL } },
 
         // order, delta encoded rectangles
+        { &hf_ts_order_coded_delta_list,
+            { "CodedDeltaList", "rdp.order_coded_delta_list", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+        { &hf_ts_order_coded_delta_list_length,
+            { "length", "rdp.order_coded_delta_list_length", FT_UINT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
+
         { &hf_ts_delta_encoded_rectangles_field_left,
             { "delta_encoded_rectangles_field_left", "rdp.delta_encoded_rectangles_field_left", FT_INT16, BASE_DEC, NULL, 0x0, NULL, HFILL } },
         { &hf_ts_delta_encoded_rectangles_field_top,
@@ -3317,6 +3341,7 @@ proto_register_rdp(void)
         &ett_ts_primary_drawing_order,
         &ett_ts_primary_drawing_order_bounds,
         &ett_ts_alternate_secondary_drawing_order,
+        &ett_ts_primary_drawing_order_coded_delta_list,
 	};
 
     module_t *rdp_module;
