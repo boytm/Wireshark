@@ -27,6 +27,7 @@
 # include "config.h"
 //#endif
 
+#include <string.h>
 #include <glib.h>
 #include <epan/packet.h>
 #include <epan/prefs.h>
@@ -35,7 +36,6 @@
 
 #define TCP_PORT_RDP 3389
 
-gint bytes = 0;
 gint offset = 0;
 gint rdp_offset = 0;
 gint tpkt_offset = 0;
@@ -50,6 +50,7 @@ gint ts_caps_set_offset = 0;
 
 int proto_rdp = -1;
 static gboolean enable_order_dissector = TRUE;
+static gboolean enable_tcp_reassemble = TRUE;
 
 static int hf_rdp_rdp = -1;
 static int hf_rdp_tpkt = -1;
@@ -796,6 +797,7 @@ dissect_ts_server_pointer_update(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_t
 void
 dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
+    gint bytes = 0;
 	guint32 shareId;
 	guint8 streamId;
 	guint16 uncompressedLength;
@@ -851,6 +853,7 @@ dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 void
 dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree) // 从Demand Active PDU开始有此header
 {
+    gint bytes = 0;
 	guint16 pduType;
 	guint16 PDUSource;
 	guint16 totalLength;
@@ -907,6 +910,7 @@ dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tr
 gint32
 dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
+    gint bytes = 0;
 	guint16 flags;
 	guint16 flagsHi;
     guint32 length;
@@ -982,17 +986,17 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 	}
 }
 
-guint32 parse_per_length(tvbuff_t *tvb)
+guint32 parse_per_length(tvbuff_t *tvb, int *off)
 {
     guint32 len;
     guint8 i;
-    guint8 l = tvb_get_guint8(tvb, offset++);
+    guint8 l = tvb_get_guint8(tvb, (*off)++);
 
     if (l & 0x80)
     {
         len = l & ~0x80;
 
-        i = tvb_get_guint8(tvb, offset++);
+        i = tvb_get_guint8(tvb, (*off)++);
         len = (len << 8) | i;
     }
     else
@@ -1156,7 +1160,7 @@ static void dissect_mcs_connect_response(tvbuff_t *tvb, packet_info *pinfo _U_ ,
     len = parse_ber_header(tvb, BER_TAG_OCTET_STRING);
     offset += 21; // skip GCC Connection Data 
 
-    len = parse_per_length(tvb);
+    len = parse_per_length(tvb, &offset);
 
     if(tvb_length_remaining(tvb, offset) >= (int)len)
     {
@@ -1236,6 +1240,7 @@ dissect_channel_pdu_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 static void
 dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
+    gint bytes = 0;
 	guint8 type;
 	guint8 byte;
 	guint8 flags;
@@ -1325,6 +1330,7 @@ dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 static void
 dissect_x224(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
+    gint bytes = 0;
 	guint8 type;
 	guint8 length;
     gchar  msg[250] = {'\0'};
@@ -2881,6 +2887,7 @@ dissect_fp_updates(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 static void
 dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
+    gint bytes = 0;
 	guint8 version;
 	guint16 length;
     guint8 num_events;
@@ -2916,7 +2923,7 @@ dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
                 sec_flags = version >> 6;
 
                 ++offset;
-                length = parse_per_length(tvb);
+                length = parse_per_length(tvb, &offset);
 
                 if(length != bytes) 
                     return;
@@ -2969,9 +2976,41 @@ dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 	}
 }
 
+static guint
+get_rdp_len(packet_info *pinfo _U_, tvbuff_t *tvb, int offset)
+{
+    gint bytes = 0;
+    guint8 version;
+    guint16 length;
+
+    bytes = tvb_length_remaining(tvb, offset);
+
+    if (bytes >= 4)
+    {
+        version = tvb_get_guint8(tvb, offset);
+
+        if (version == 3)
+        {
+            length = tvb_get_ntohs(tvb, offset + 2);
+        }
+        else if ((version & 0x03) == FASTPATH_INPUT_ACTION_FASTPATH )
+        {
+            ++offset;
+            length = parse_per_length(tvb, &offset); // TODO: ensure parse length using at most two bytes
+        }
+    }
+
+    return length;
+}
+
+
+#define TPKT_HEADER_LEN 4
+
 static void
 dissect_rdp(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
+    gint bytes = 0;
+
 	if (tree)
 	{
 		offset = 0;
@@ -2991,6 +3030,40 @@ dissect_rdp(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 			dissect_tpkt(tvb, pinfo, rdp_tree);
 		}
 	}
+}
+
+
+int ends_with(const char *str, const char *suffix)
+{
+    size_t lenstr;
+    size_t lensuffix;
+
+    if (!str || !suffix)
+        return 0;
+    lenstr = strlen(str);
+    lensuffix = strlen(suffix);
+    if (lensuffix >  lenstr)
+        return 0;
+    return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
+}
+
+#define PROTOCOL_FILTER_NAME "rdp"
+
+static void
+dissect_rdp_raw(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    const char *suffix = "tcp:" PROTOCOL_FILTER_NAME;
+
+    //if (pinfo->layer_names && ends_with(pinfo->layer_names->str, suffix))
+    {
+        // if parent protocol is tcp, then tcp reassemble
+        tcp_dissect_pdus(tvb, pinfo, tree, enable_tcp_reassemble, TPKT_HEADER_LEN,
+                get_rdp_len, dissect_rdp);
+    }
+    //else
+    //{
+    //    dissect_rdp(tvb, pinfo, tree);
+    //}
 }
 
 void
@@ -3346,8 +3419,9 @@ proto_register_rdp(void)
 
     module_t *rdp_module;
 
-	proto_rdp = proto_register_protocol("Remote Desktop Protocol", "RDP", "rdp");
+	proto_rdp = proto_register_protocol("Remote Desktop Protocol", "RDP", PROTOCOL_FILTER_NAME);
 	register_dissector("rdp", dissect_rdp, proto_rdp);
+	register_dissector("rdp_over_tcp", dissect_rdp_raw, proto_rdp); // rdp without TLS
 
 	proto_register_field_array(proto_rdp, hf, array_length(hf));
 	proto_register_subtree_array(ett, array_length(ett));// tree id is used to expanded/collapsed state of the subtree
@@ -3358,6 +3432,13 @@ proto_register_rdp(void)
         "Whether the order should be dissect according to [RDPEGDI]",
         &enable_order_dissector);
 
+    prefs_register_bool_preference(rdp_module, "desegment_rdp_messages",
+            "Reassemble RDP messages spanning multiple TCP segments",
+            "Whether the RDP dissector should reassemble messages spanning multiple TCP segments. "
+            "To use this option, you must also enable \"Allow subdissectors to reassemble TCP streams\" in the TCP protocol settings.",
+            &enable_tcp_reassemble);
+
+
 	module_rdp = prefs_register_protocol( proto_rdp, proto_reg_handoff_rdp);
 }
 
@@ -3366,7 +3447,7 @@ proto_reg_handoff_rdp(void)
 {
 	dissector_handle_t rdp_handle;
 
-	rdp_handle = find_dissector("rdp");
+	rdp_handle = find_dissector("rdp_over_tcp");
 	dissector_add_uint("tcp.port", TCP_PORT_RDP, rdp_handle);
 
 }
