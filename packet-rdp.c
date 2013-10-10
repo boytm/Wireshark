@@ -23,14 +23,17 @@
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#ifdef HAVE_CONFIG_H
+//#ifdef HAVE_CONFIG_H
 # include "config.h"
-#endif
+//#endif
 
 #include <glib.h>
 #include <epan/packet.h>
 #include <epan/prefs.h>
+#include <epan/conversation.h>
 #include "packet-rdp.h"
+
+#define TCP_PORT_RDP 3389
 
 gint bytes = 0;
 gint offset = 0;
@@ -52,6 +55,7 @@ static int hf_rdp_mcs = -1;
 static int hf_ts_security_header = -1;
 static int hf_ts_share_control_header = -1;
 static int hf_ts_share_data_header = -1;
+static int hf_client_fastinput_event_pdu = -1;
 
 static int hf_ts_confirm_active_pdu = -1;
 static int hf_ts_confirm_active_pdu_shareid = -1;
@@ -61,6 +65,21 @@ static int hf_ts_confirm_active_pdu_length_combined_capabilities = -1;
 static int hf_ts_confirm_active_pdu_source_descriptor = -1;
 static int hf_ts_confirm_active_pdu_number_capabilities = -1;
 static int hf_ts_confirm_active_pdu_pad2octets = -1;
+
+static int hf_mcs_connect_response_pdu = -1;
+static int hf_mcs_connect_response_pdu_server_core_data = -1;
+static int hf_mcs_connect_response_pdu_server_network_data = -1;
+static int hf_mcs_connect_response_pdu_server_security_data = -1;
+static int hf_mcs_connect_response_pdu_server_message_channel_data = -1;
+static int hf_mcs_connect_response_pdu_server_multitransport_channel_data = -1;
+
+static int hf_ts_server_security_encryption_method = -1;
+static int hf_ts_server_security_encryption_level = -1;
+static int hf_ts_server_public_key_modulus = -1;
+static int hf_ts_server_public_key_exponent = -1;
+static int hf_ts_server_proprietary_certificate_signature = -1;
+
+static int hf_ts_input_event = -1;
 
 static int hf_ts_capability_sets = -1;
 
@@ -73,6 +92,9 @@ static gint ett_rdp = -1;
 static gint ett_ts_confirm_active_pdu = -1;
 static gint ett_ts_capability_sets = -1;
 static gint ett_ts_caps_set = -1;
+static gint ett_mcs_connect_response_pdu = -1;
+static gint ett_ts_server_secutiry_data = -1;
+static gint ett_ts_input_events = -1;
 
 #define SEC_EXCHANGE_PKT			0x0001
 #define SEC_ENCRYPT				0x0008
@@ -161,6 +183,81 @@ static gint ett_ts_caps_set = -1;
 #define X224_DISCONNECT_REQUEST			0x8
 #define X224_DISCONNECT_CONFIRM			0xC
 #define X224_DATA				0xF
+
+#define PROTOCOL_RDP            0x00000000
+#define PROTOCOL_SSL            0x00000001
+#define PROTOCOL_HYBRID         0x00000002
+#define PROTOCOL_HYBRID_EX      0x00000008
+
+#define SSL_REQUIRED_BY_SERVER 0x00000001 
+#define SSL_NOT_ALLOWED_BY_SERVER 0x00000002 
+#define SSL_CERT_NOT_ON_SERVER 0x00000003 
+#define INCONSISTENT_FLAGS 0x00000004 
+#define HYBRID_REQUIRED_BY_SERVER 0x00000005 
+#define SSL_WITH_USER_AUTH_REQUIRED_BY_SERVER 0x00000006
+
+#define TYPE_RDP_NEG_REQ 0x01
+#define TYPE_RDP_NEG_RSP 0x02
+#define TYPE_RDP_NEG_FAILURE 0x03
+
+#define BER_TAG_BOOLEAN                1
+#define BER_TAG_INTEGER                2
+#define BER_TAG_OCTET_STRING           4
+#define BER_TAG_RESULT                 10
+#define MCS_TAG_DOMAIN_PARAMS          0x30
+
+#define ENCRYPTION_METHOD_NONE 0x00000000 
+#define ENCRYPTION_METHOD_40BIT 0x00000001 
+#define ENCRYPTION_METHOD_128BIT 0x00000002 
+#define ENCRYPTION_METHOD_56BIT 0x00000008 
+#define ENCRYPTION_METHOD_FIPS 0x00000010 
+
+#define ENCRYPTION_LEVEL_NONE  0x00000000 
+#define ENCRYPTION_LEVEL_LOW  0x00000001 
+#define ENCRYPTION_LEVEL_CLIENT_COMPATIBLE  0x00000002 
+#define ENCRYPTION_LEVEL_HIGH  0x00000003 
+#define ENCRYPTION_LEVEL_FIPS  0x00000004 
+
+#define CERT_CHAIN_VERSION_1 0x00000001 
+#define CERT_CHAIN_VERSION_2 0x00000002 
+
+#define SIGNATURE_ALG_RSA 0x00000001
+#define KEY_EXCHANGE_ALG_RSA 0x00000001
+
+#define BB_RSA_KEY_BLOB 0x0006
+#define BB_RSA_SIGNATURE_BLOB 0x0008
+
+#define FASTPATH_INPUT_ACTION_FASTPATH 0x0
+#define FASTPATH_INPUT_ACTION_X224 0x3 
+
+#define FASTPATH_INPUT_SECURE_CHECKSUM 0x1 
+#define FASTPATH_INPUT_ENCRYPTED 0x2 
+
+static const value_string protocol_types[] = {
+    { PROTOCOL_RDP, "RDP" },
+    { PROTOCOL_SSL, "TLS" },
+    { PROTOCOL_HYBRID, "CredSSP" },
+    { PROTOCOL_HYBRID_EX, "CredSSP coupled with the Early User Authorization Result PDU" },
+	{ 0x0,	NULL }
+};
+
+static const value_string nego_failure_types[] = {
+    { SSL_REQUIRED_BY_SERVER, "0x00000001 " },
+    { SSL_NOT_ALLOWED_BY_SERVER, "0x00000002 " },
+    { SSL_CERT_NOT_ON_SERVER, "0x00000003 " },
+    { INCONSISTENT_FLAGS, "0x00000004 " },
+    { HYBRID_REQUIRED_BY_SERVER, "0x00000005 " },
+    { SSL_WITH_USER_AUTH_REQUIRED_BY_SERVER, "0x00000006" },
+	{ 0x0,	NULL }
+};
+
+static const value_string nego_types[] = {
+    { TYPE_RDP_NEG_REQ, "Negotiation Request" },
+    { TYPE_RDP_NEG_RSP, "Negotiation Response" },
+    { TYPE_RDP_NEG_FAILURE, "Negotiation Failure" },
+
+	{ 0x0,	NULL }
+};
 
 static const value_string capability_set_types[] = {
 	{ CAPSET_TYPE_GENERAL,			"General" },
@@ -253,6 +350,13 @@ static const value_string x224_tpdu_types[] = {
 	{ 0x0,	NULL }
 };
 
+static const value_string fast_path_input_event_security [] = {
+	{ FASTPATH_INPUT_ENCRYPTED,		"Encrypted" },
+	{ FASTPATH_INPUT_ENCRYPTED | FASTPATH_INPUT_SECURE_CHECKSUM,		"Encrypted with checksum" },
+	{ 0x0,	NULL }
+};
+
+
 void proto_reg_handoff_rdp(void);
 void dissect_ts_caps_set(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_confirm_active_pdu(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
@@ -260,6 +364,46 @@ void dissect_ts_info_packet(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *
 void dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
 void dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree);
+
+#define RDP_SECURITY_STANDARD 1024
+#define RDP_SECURITY_SSL 1
+#define RDP_SECURITY_HYBRID 2
+#define RDP_SECURITY_ENHANCED 0x8000
+typedef struct _rdp_conv_info_t
+{
+    guint32 rdp_security;
+    guint32 have_server_license_error_pdu; // after Server License Error PDU, security header become optional
+    guint16 server_port;
+    //guint32 encryption_method;
+    //guint32 encryption_level;
+    //guint32 server_public_key_len;
+    //guint32 exponent;
+    //char[256] server_modulus;
+    //char[256] client_modulus;
+
+} rdp_conv_info_t;
+
+inline rdp_conv_info_t* conversation_data(packet_info *pinfo)
+{
+    conversation_t *conversation;
+    rdp_conv_info_t *rdp_info;
+
+    conversation = find_or_create_conversation(pinfo);
+
+    rdp_info = (rdp_conv_info_t *)conversation_get_proto_data(conversation, proto_rdp);
+    if (!rdp_info) {
+        /* No.  Attach that information to the conversation, and add
+         *                 * it to the list of information structures.
+         *                                 */
+        rdp_info = se_new(rdp_conv_info_t);
+
+        memset(rdp_info, 0, sizeof(*rdp_info));
+
+        conversation_add_proto_data(conversation, proto_rdp, rdp_info);
+    }
+
+    return rdp_info;
+}
 
 void
 dissect_ts_caps_set(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
@@ -372,7 +516,7 @@ dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 		if (bytes >= 4)
 		{
 			proto_item *ti;
-			ts_share_control_header_offset = offset;
+			ts_share_data_header_offset = offset;
 			shareId = tvb_get_letohl(tvb, offset);
 			streamId = tvb_get_guint8(tvb, offset + 5);
 			uncompressedLength = tvb_get_letohs(tvb, offset + 6);
@@ -389,7 +533,7 @@ dissect_ts_share_data_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree 
 }
 
 void
-dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree) // 从Demand Active PDU开始有此header
 {
 	guint16 pduType;
 	guint16 PDUSource;
@@ -397,7 +541,7 @@ dissect_ts_share_control_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tr
 
 	if (tree)
 	{
-		bytes = tvb_length_remaining(tvb, 0);
+		bytes = tvb_length_remaining(tvb, offset);
 		totalLength = tvb_get_letohs(tvb, offset);
 
 		if (bytes >= 4)
@@ -438,10 +582,17 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 {
 	guint16 flags;
 	guint16 flagsHi;
+    guint32 length;
+    rdp_conv_info_t *rdp_info;
+
+    rdp_info = conversation_data(pinfo);
+
+    if(rdp_info->rdp_security == ENCRYPTION_LEVEL_NONE && rdp_info->have_server_license_error_pdu)
+        return dissect_ts_share_control_header(tvb, pinfo, tree);
 
 	if (tree)
 	{
-		bytes = tvb_length_remaining(tvb, 0);
+		bytes = tvb_length_remaining(tvb, offset);
 
 		if (bytes >= 4)
 		{
@@ -454,14 +605,251 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
 			ti = proto_tree_add_item(tree, hf_ts_security_header, tvb, ts_security_header_offset, offset - ts_security_header_offset, FALSE);
 			proto_item_set_text(ti, "TS_SECURITY_HEADER, Flags = 0x%04X", flags);
 
-			if (flags & SEC_INFO_PKT)
+            if (flags & SEC_ENCRYPT)
+            {
+                // TODO: decrypt
+            }
+
+            if (flags & SEC_EXCHANGE_PKT)
+            {
+                // TODO: get encrypted client random
+                length = tvb_get_letohl(tvb, offset);
+
+				col_clear(pinfo->cinfo, COL_INFO);
+				col_add_str(pinfo->cinfo, COL_INFO, "Client Security Exchange PDU");
+            }
+            else if (flags & SEC_INFO_PKT)
 			{
 				dissect_ts_info_packet(tvb, pinfo, tree);
 				col_clear(pinfo->cinfo, COL_INFO);
 				col_add_str(pinfo->cinfo, COL_INFO, "Client Info PDU");
 			}
+            else if (flags & SEC_LICENSE_PKT)
+            {
+				col_clear(pinfo->cinfo, COL_INFO);
+				col_add_str(pinfo->cinfo, COL_INFO, "Server License Error PDU - Valid Client");
+
+                rdp_info->have_server_license_error_pdu = 1;
+            } 
+            else
+            {
+                //dissect_ts_share_control_header(tvb, pinfo, tree);
+            }
 		}
 	}
+}
+
+guint32 parse_per_length(tvbuff_t *tvb)
+{
+    guint32 len;
+    guint8 i;
+    guint8 l = tvb_get_guint8(tvb, offset++);
+
+    if (l & 0x80)
+    {
+        len = l & ~0x80;
+
+        i = tvb_get_guint8(tvb, offset++);
+        len = (len << 8) | i;
+    }
+    else
+    {
+        len = l;
+    }
+    return len;
+}
+
+guint32 parse_ber_length(tvbuff_t *tvb)
+{
+    guint32 len;
+    guint8 i;
+    guint8 l = tvb_get_guint8(tvb, offset++);
+
+    if (l & 0x80)
+    {
+        l = l & ~0x80;
+        len = 0;
+
+        while (l > 0)
+        {
+            i = tvb_get_guint8(tvb, offset++);
+            len = (len << 8) | i;
+            l--;
+        }
+    }
+    else
+    {
+        len = l;
+    }
+    return len;
+}
+
+guint32 parse_ber_header(tvbuff_t *tvb, int tag)
+{
+    guint32 v;
+
+    if(tag > 0xff)
+    {
+        v = tvb_get_ntohs(tvb, offset);
+        offset += 2;
+    }
+    else
+    {
+        v = tvb_get_guint8(tvb, offset);
+        offset += 1;
+    }
+
+    if(tag != v)
+        return -1;// error
+        
+    return parse_ber_length(tvb);
+}
+
+
+static void dissect_mcs_server_security_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *tree)
+{
+    guint32 encryption_method;
+    guint32 encryption_level;
+    guint32 cert_chain_version;
+
+    guint32 server_random_len;
+    guint32 server_cert_len;
+    guint32 server_cert_offset;
+    guint32 public_key_blob_offset;
+    guint32 signature_blob_offset;
+    guint16 public_key_blob_len;
+    guint32 public_key_len;
+    guint32 public_key_exponent;
+
+    guint16 signature_len;
+
+    rdp_conv_info_t *rdp_info = conversation_data(pinfo);
+    rdp_info->server_port = pinfo->srcport; // sever -> client
+
+    encryption_method = tvb_get_letohl(tvb, offset + 4);
+    encryption_level = tvb_get_letohl(tvb, offset + 8);
+
+    proto_tree_add_item(tree, hf_ts_server_security_encryption_method, tvb, offset + 4, 4, TRUE);
+    proto_tree_add_item(tree, hf_ts_server_security_encryption_level, tvb, offset + 8, 4, TRUE);
+
+    if(encryption_level == ENCRYPTION_LEVEL_NONE)
+    {
+        return; // not encrypt
+    }
+
+    rdp_info->rdp_security = encryption_level; // 0 None; 1-3 CR4; 4 FIPS
+
+    server_random_len = tvb_get_letohl(tvb, offset + 12);
+    server_cert_len = tvb_get_letohl(tvb, offset + 16);
+
+    server_cert_offset = offset + 20 + server_random_len;
+
+    cert_chain_version = tvb_get_letohl(tvb, server_cert_offset) & 0x7fffffff;
+    if(cert_chain_version == CERT_CHAIN_VERSION_1)
+    {
+        // dwSigAlgId, dwKeyAlgId
+        assert(SIGNATURE_ALG_RSA == tvb_get_letohl(tvb, server_cert_offset + 4));
+        assert(KEY_EXCHANGE_ALG_RSA == tvb_get_letohl(tvb, server_cert_offset + 8));
+        
+        // PublicKeyBlob
+        public_key_blob_offset = server_cert_offset + 12;
+
+        assert(BB_RSA_KEY_BLOB == tvb_get_letohs(tvb, public_key_blob_offset));
+        public_key_blob_len = tvb_get_letohs(tvb, public_key_blob_offset + 2);
+
+        public_key_len = tvb_get_letohl(tvb, public_key_blob_offset + 8); // keylen
+
+        public_key_exponent = tvb_get_letohl(tvb, public_key_blob_offset + 20);
+        proto_tree_add_item(tree, hf_ts_server_public_key_exponent, tvb, public_key_blob_offset + 20, 4, TRUE);
+        proto_tree_add_item(tree, hf_ts_server_public_key_modulus, tvb, public_key_blob_offset + 24, public_key_len, TRUE);
+
+        // SignatureBlob
+        signature_blob_offset = public_key_blob_offset + 4 + public_key_blob_len;
+
+        assert(BB_RSA_SIGNATURE_BLOB == tvb_get_letohs(tvb, signature_blob_offset));
+        signature_len = tvb_get_letohs(tvb, signature_blob_offset + 2);
+
+        proto_tree_add_item(tree, hf_ts_server_proprietary_certificate_signature, tvb, signature_blob_offset + 4, signature_len, TRUE);
+        
+    }
+    else
+    {
+        // 
+    }
+}
+
+#define SC_CORE 0x0c01
+#define SC_SECURITY 0x0c02
+#define SC_NET 0x0c03
+#define SC_MCS_MSGCHANNEL 0x0C04 
+#define SC_MULTITRANSPORT 0x0C08 
+
+
+static void dissect_mcs_connect_response(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    guint16 type;
+    guint32 len;
+    proto_item *ti;
+    proto_tree *mcs_connect_response_pdu_tree;
+    proto_tree *server_security_data_tree;
+    
+    gint mcs_connect_response_pdu_offset = offset - 2;
+
+    len = parse_ber_length(tvb);
+
+    ti = proto_tree_add_item(tree, hf_mcs_connect_response_pdu, tvb, mcs_connect_response_pdu_offset, len + offset - mcs_connect_response_pdu_offset, TRUE);
+
+    len = parse_ber_header(tvb, BER_TAG_RESULT);
+    offset += len; // Connect-Response::result
+
+    len = parse_ber_header(tvb, BER_TAG_INTEGER);
+    offset += len; // Connect-Response::calledConnectId
+
+    len = parse_ber_header(tvb, MCS_TAG_DOMAIN_PARAMS);
+    offset += len; // Connect-Response::domainParameters
+
+    // Connect-Response::userData
+    len = parse_ber_header(tvb, BER_TAG_OCTET_STRING);
+    offset += 21; // skip GCC Connection Data 
+
+    len = parse_per_length(tvb);
+
+    if(tvb_length_remaining(tvb, offset) >= len)
+    {
+		mcs_connect_response_pdu_tree = proto_item_add_subtree(ti, ett_mcs_connect_response_pdu);
+
+        while(tvb_length_remaining(tvb, offset) > 0)
+        {
+            type = tvb_get_letohs(tvb, offset);
+            len = tvb_get_letohs(tvb, offset + 2);
+
+            switch(type)
+            {
+                case SC_CORE:
+                    proto_tree_add_item(mcs_connect_response_pdu_tree, hf_mcs_connect_response_pdu_server_core_data, tvb, offset, len, TRUE);
+                    break;
+                case SC_NET:
+                    proto_tree_add_item(mcs_connect_response_pdu_tree, hf_mcs_connect_response_pdu_server_network_data, tvb, offset, len, TRUE);
+                    break;
+                case SC_SECURITY:
+                    ti = proto_tree_add_item(mcs_connect_response_pdu_tree, hf_mcs_connect_response_pdu_server_security_data, tvb, offset, len, TRUE);
+                    server_security_data_tree = proto_item_add_subtree(ti, ett_ts_server_secutiry_data);
+
+                    dissect_mcs_server_security_data(tvb, pinfo, server_security_data_tree); // dissect
+                    break;
+                case SC_MCS_MSGCHANNEL:
+                    proto_tree_add_item(mcs_connect_response_pdu_tree, hf_mcs_connect_response_pdu_server_message_channel_data, tvb, offset, len, TRUE);
+                case SC_MULTITRANSPORT:
+                    proto_tree_add_item(mcs_connect_response_pdu_tree, hf_mcs_connect_response_pdu_server_multitransport_channel_data, tvb, offset, len, TRUE);
+                default:
+                    break;
+            }
+
+            offset += len;
+        }
+
+    }
+
 }
 
 static void
@@ -477,7 +865,7 @@ dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 
 	if (tree)
 	{
-		bytes = tvb_length_remaining(tvb, 0);
+		bytes = tvb_length_remaining(tvb, offset);
 
 		if (bytes > 0)
 		{
@@ -494,10 +882,15 @@ dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 
 			switch (type)
 			{
+                case MCS_CONNECT_RESPONSE:
+                    // get server random
+                    dissect_mcs_connect_response(tvb, pinfo, tree);
+                    break;
+
 				case MCS_SEND_DATA_INDICATION:
 				case MCS_SEND_DATA_REQUEST:
-					initiator = tvb_get_ntohs(tvb, offset + 2);
-					channelId = tvb_get_ntohs(tvb, offset + 4);
+					initiator = tvb_get_ntohs(tvb, offset + 2); // need +1001
+					channelId = tvb_get_ntohs(tvb, offset + 4); // MCS_GLOBAL_CHANNEL=1003
 					offset += 4;
 					flags = tvb_get_guint8(tvb, offset++);
 
@@ -519,7 +912,8 @@ dissect_mcs(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 					if ((offset - rdp_offset) + length != real_length)
 						proto_item_append_text(ti, " [Length Mismatch: %d]", real_length);
 
-					dissect_ts_share_control_header(tvb, pinfo, tree);
+                    dissect_ts_security_header(tvb, pinfo, tree);
+// 需处理 TS_SECURITY_HEADER，如果  Client MCS Connect Initial PDU with GCC Conference Create Request 定义了Client Security Data (TS_UD_CS_SEC) 
 					break;
 
 				default:
@@ -536,10 +930,11 @@ dissect_x224(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
 	guint8 type;
 	guint8 length;
+    gchar  msg[250] = {'\0'};
 
 	if (tree)
 	{
-		bytes = tvb_length_remaining(tvb, 0);
+		bytes = tvb_length_remaining(tvb, offset);
 
 		if (bytes > 0)
 		{
@@ -550,8 +945,24 @@ dissect_x224(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 
 			if (length > 1)
 			{
+                if(type == X224_CONNECTION_CONFIRM && length > 7)
+                {
+                    guint8 nego_type = tvb_get_guint8(tvb, offset + 7);
+                    guint32 nego_detail = tvb_get_letohl(tvb, offset + 11);
+
+                    g_snprintf(msg, sizeof(msg), ": %s-", val_to_str(nego_type, nego_types, "Unknown %d"));
+
+                    if(nego_type == TYPE_RDP_NEG_RSP)
+                    {
+                        strcat(msg, val_to_str(nego_detail, protocol_types, "Unknown %d"));
+                        conversation_data(pinfo)->rdp_security = RDP_SECURITY_ENHANCED | nego_detail; 
+                    }
+                    else if(nego_type == TYPE_RDP_NEG_FAILURE)
+                        strcat(msg, val_to_str(nego_detail, nego_failure_types, "Unknown %d"));
+                }
+
 				ti = proto_tree_add_item(tree, hf_rdp_x224, tvb, offset, length + 1, FALSE);
-				proto_item_set_text(ti, "X.224 %s TPDU", val_to_str(type, x224_tpdu_types, "Unknown %d"));
+				proto_item_set_text(ti, "X.224 %s TPDU %s", val_to_str(type, x224_tpdu_types, "Unknown %d"), msg);
 				offset += (length + 1);
 				dissect_mcs(tvb, pinfo, tree);
 			}
@@ -559,15 +970,184 @@ dissect_x224(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 	}
 }
 
+// event code of eventHeader
+#define FASTPATH_INPUT_EVENT_SCANCODE 0x0 
+#define FASTPATH_INPUT_EVENT_MOUSE 0x1 
+#define FASTPATH_INPUT_EVENT_MOUSEX 0x2 
+#define FASTPATH_INPUT_EVENT_SYNC 0x3 
+#define FASTPATH_INPUT_EVENT_UNICODE 0x4 
+
+// event flags of eventHeader
+#define FASTPATH_INPUT_KBDFLAGS_RELEASE 0x01 
+#define FASTPATH_INPUT_KBDFLAGS_EXTENDED 0x02 
+
+#define FASTPATH_INPUT_SYNC_SCROLL_LOCK 0x01 
+#define FASTPATH_INPUT_SYNC_NUM_LOCK 0x02 
+#define FASTPATH_INPUT_SYNC_CAPS_LOCK 0x04 
+#define FASTPATH_INPUT_SYNC_KANA_LOCK 0x08 
+
+// mouse event pointerFlags
+#define PTRFLAGS_WHEEL 0x0200 
+#define PTRFLAGS_WHEEL_NEGATIVE 0x0100 
+#define WheelRotationMask 0x01FF 
+#define PTRFLAGS_MOVE 0x0800 
+#define PTRFLAGS_DOWN 0x8000 
+#define PTRFLAGS_BUTTON1 0x1000 
+#define PTRFLAGS_BUTTON2 0x2000 
+#define PTRFLAGS_BUTTON3 0x4000 
+
+// extended mouse event pointerFlgas
+#define PTRXFLAGS_DOWN 0x8000 
+#define PTRXFLAGS_BUTTON1 0x0001 
+#define PTRXFLAGS_BUTTON2 0x0002 
+
+static const value_string fast_path_input_event_types [] = {
+    { FASTPATH_INPUT_EVENT_SCANCODE, "Keyboard Event" },
+    { FASTPATH_INPUT_EVENT_MOUSE, "Mouse Event" },
+    { FASTPATH_INPUT_EVENT_MOUSEX, "Extended Mouse Event" },
+    { FASTPATH_INPUT_EVENT_SYNC, "Synchronize Event" },
+    { FASTPATH_INPUT_EVENT_UNICODE, "Unicode Keyboard Event" },
+    { 0x0,	NULL }
+};
+
+static const value_string fast_path_input_keyboard_event [] = {
+	{ FASTPATH_INPUT_KBDFLAGS_RELEASE, "Release" },
+	{ 0x0,	NULL }
+};
+
+static const value_string input_mouse_event_buttons [] = {
+    { PTRFLAGS_BUTTON1, "Button1" },
+    { PTRFLAGS_BUTTON2, "Button2" },
+    { PTRFLAGS_BUTTON3, "Button3 " },
+    { PTRXFLAGS_BUTTON1, "Extended Mouse Button1" },
+    { PTRXFLAGS_BUTTON2, "Extended Mouse Button2" },
+    { 0x0,	NULL }
+};
+
+
+static void
+dissect_fp_input_events(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    guint8 event_header;
+    guint8 event_code;
+    guint8 event_flags;
+
+    proto_item *ti;
+
+    guint16 key_code;
+    guint16 x_pos;
+    guint16 y_pos;
+    guint16 pointer_flags;
+    guint16 wheel_rotation;
+
+    guint8 event_size;
+    guint8 event_detail[20] = {'\0'};
+    guint32 bytes_remaining;
+
+#define GET_MOUSE_POS_FLAGS \
+    pointer_flags = tvb_get_letohs(tvb, offset + 1);\
+    x_pos = tvb_get_letohs(tvb, offset + 3);\
+    y_pos = tvb_get_letohs(tvb, offset + 5);\
+
+    bytes_remaining = tvb_length_remaining(tvb, offset);
+
+    while (bytes_remaining > 0)
+    {
+        event_header = tvb_get_guint8(tvb, offset);
+        event_flags = event_header & 0x1F;
+        event_code = event_header >> 5;
+
+        // reset
+        event_size = 0;
+        memset(event_detail, 0, sizeof(event_detail));
+
+        switch (event_code)
+        {
+            case FASTPATH_INPUT_EVENT_SCANCODE:
+                key_code = tvb_get_guint8(tvb, offset + 1); 
+                g_snprintf(event_detail, sizeof(event_detail), "Key %s, %sCode: %X", 
+                        val_to_str(event_flags & FASTPATH_INPUT_KBDFLAGS_RELEASE, fast_path_input_keyboard_event, "Down"),
+                        event_flags & FASTPATH_INPUT_KBDFLAGS_EXTENDED ? "Extended " : "",
+                        key_code);
+                event_size = 2;
+                break;
+
+            case FASTPATH_INPUT_EVENT_MOUSE:
+                GET_MOUSE_POS_FLAGS;
+
+                if (pointer_flags & PTRFLAGS_WHEEL)
+                {
+                    wheel_rotation = pointer_flags & (WheelRotationMask & ~PTRFLAGS_WHEEL_NEGATIVE);
+                    wheel_rotation *= pointer_flags & PTRFLAGS_WHEEL_NEGATIVE ? -1 : 1;
+                    
+                    g_snprintf(event_detail, sizeof(event_detail), "Wheel Rotation %d", wheel_rotation);
+                }
+                else if (pointer_flags & PTRFLAGS_MOVE)
+                {
+                    g_snprintf(event_detail, sizeof(event_detail), "Move (%d, %d)", x_pos, y_pos);
+                }
+                else
+                {
+                    g_snprintf(event_detail, sizeof(event_detail), "%s %s (%d, %d)", 
+                            val_to_str(pointer_flags & 0x7000, input_mouse_event_buttons, "Ukown Button %d"),
+                            pointer_flags & PTRFLAGS_DOWN ? "Down" : "Up",
+                            x_pos, y_pos);
+                }
+
+                event_size = 7;
+                break;
+
+            case FASTPATH_INPUT_EVENT_MOUSEX:
+                GET_MOUSE_POS_FLAGS;
+
+                g_snprintf(event_detail, sizeof(event_detail), "%s %s (%d, %d)", 
+                        val_to_str(pointer_flags & 0x0003, input_mouse_event_buttons, "Ukown Button %d"),
+                        pointer_flags & PTRXFLAGS_DOWN ? "Down" : "Up",
+                        x_pos, y_pos);
+
+                event_size = 7;
+                break;
+
+            case FASTPATH_INPUT_EVENT_SYNC:
+                event_size = 1;
+                break;
+
+            case FASTPATH_INPUT_EVENT_UNICODE:
+                key_code = tvb_get_letohs(tvb, offset + 1); 
+                g_snprintf(event_detail, sizeof(event_detail), "Key %s, Code: %X", 
+                        val_to_str(event_flags & FASTPATH_INPUT_KBDFLAGS_RELEASE, fast_path_input_keyboard_event, "Down"),
+                        key_code);
+                event_size = 3;
+                break;
+
+            default:
+                // never reach here
+                event_size = bytes_remaining;
+                g_snprintf(event_detail, sizeof(event_detail), "Error");
+        }
+
+        ti = proto_tree_add_item(tree, hf_ts_input_event, tvb, offset, event_size, TRUE);
+        proto_item_set_text(ti, "%s, %s", val_to_str(event_code, fast_path_input_event_types, "Unknown %d"), event_detail);
+
+        offset += event_size;
+        bytes_remaining = tvb_length_remaining(tvb, offset);
+    }
+}
+
+
 static void
 dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
 	guint8 version;
 	guint16 length;
+    guint8 num_events;
+    guint8 sec_flags;
+
+    proto_tree *ts_input_events_tree;
 
 	if (tree)
 	{
-		bytes = tvb_length_remaining(tvb, 0);
+		bytes = tvb_length_remaining(tvb, offset);
 
 		if (bytes >= 4)
 		{
@@ -583,6 +1163,36 @@ dissect_tpkt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 				offset += 4;
 				dissect_x224(tvb, pinfo, tree);
 			}
+            else if ((version & 0x03) == FASTPATH_INPUT_ACTION_FASTPATH)// TODO: 低2位为0 FASTINPUT
+            {
+                num_events = (version >> 2) & 0x0F;
+                sec_flags = version >> 6;
+
+                ++offset;
+                length = parse_per_length(tvb);
+
+                if(length != bytes) // if numEvents == 0, then after fips dataSignature
+                    return;
+
+				ti = proto_tree_add_item(tree, hf_client_fastinput_event_pdu, tvb, 0, bytes, FALSE);
+                ts_input_events_tree = proto_item_add_subtree(ti, ett_ts_input_events);
+
+                if (sec_flags)
+                {
+                    // TODO: FIPS 
+                }
+                else
+                {
+                    if (num_events == 0)
+                        num_events = tvb_get_guint8(tvb, offset++);
+
+                    dissect_fp_input_events(tvb, pinfo, tree);
+                }
+
+				proto_item_set_text(ti, "Client Fast-Path Input Event PDU, Length = %d, Events = %d, %s", (int)length, (int)num_events, val_to_str(sec_flags, fast_path_input_event_security, ""));
+				col_clear(pinfo->cinfo, COL_INFO);
+				col_add_str(pinfo->cinfo, COL_INFO, "Client Fast-Path Input Event PDU");
+            }
 		}
 	}
 }
@@ -650,6 +1260,75 @@ proto_register_ts_capability_sets(void)
 }
 
 void
+proto_register_ts_input_events(void)
+{
+	static hf_register_info hf[] =
+	{
+		{ &hf_ts_input_event,
+		  { "inputEvent", "rdp.input_event", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+	};
+
+	static gint *ett[] = {
+		&ett_ts_input_events
+	};
+
+	proto_register_field_array(proto_rdp, hf, array_length(hf));
+	proto_register_subtree_array(ett, array_length(ett));
+}
+
+void
+proto_register_ts_server_security_data(void)
+{
+	static hf_register_info hf[] =
+	{
+		{ &hf_ts_server_security_encryption_method,
+		  { "serverSecurityEncryptionMethod", "rdp.server_enc_method", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_security_encryption_level,
+		  { "serverSecurityEncryptionLevel", "rdp.server_enc_level", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_public_key_modulus,
+		  { "serverPublicKeyModulus", "rdp.server_modulus", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_public_key_exponent,
+		  { "serverPublicKeyExponent", "rdp.server_exponent", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_ts_server_proprietary_certificate_signature,
+		  { "serverProprietaryCertificateSignature", "rdp.server_signature", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+	};
+
+	static gint *ett[] = {
+		&ett_ts_server_secutiry_data
+	};
+
+	proto_register_field_array(proto_rdp, hf, array_length(hf));
+	proto_register_subtree_array(ett, array_length(ett));
+
+}
+
+void
+proto_register_mcs_connect_response_pdu(void)
+{
+	static hf_register_info hf[] =
+	{
+		{ &hf_mcs_connect_response_pdu_server_core_data,
+		  { "serverCoreData", "rdp.server_core", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_network_data,
+		  { "serverNetworkData", "rdp.server_network", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_security_data,
+		  { "serverSecurityData", "rdp.server_security", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_message_channel_data,
+		  { "serverMessageChannelData", "rdp.server_message_channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu_server_multitransport_channel_data,
+		  { "serverMultitransportChannelData", "rdp.server_multi_channel", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+	};
+
+	static gint *ett[] = {
+		&ett_mcs_connect_response_pdu
+	};
+
+	proto_register_field_array(proto_rdp, hf, array_length(hf));
+	proto_register_subtree_array(ett, array_length(ett));
+
+}
+
+void
 proto_register_ts_confirm_active_pdu(void)
 {
 	static hf_register_info hf[] =
@@ -702,7 +1381,11 @@ proto_register_rdp(void)
 		{ &hf_ts_share_data_header,
 		  { "TS_SHARE_DATA_HEADER", "rdp.share_data", FT_BYTES, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 		{ &hf_ts_confirm_active_pdu,
-		  { "Confirm Active PDU", "rdp.confirm_active", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
+		  { "Confirm Active PDU", "rdp.confirm_active", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_mcs_connect_response_pdu,
+		  { "MCS Connect Response PDU", "rdp.connect_response", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
+		{ &hf_client_fastinput_event_pdu,
+		  { "Client Fast-Path Input Event PDU", "rdp.fastinput", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } }
 	};
 
 	static gint *ett[] = {
@@ -714,12 +1397,19 @@ proto_register_rdp(void)
 
 	proto_register_field_array(proto_rdp, hf, array_length(hf));
 	proto_register_subtree_array(ett, array_length(ett));
+    proto_register_mcs_connect_response_pdu();
+    proto_register_ts_server_security_data();
+    proto_register_ts_input_events();
 	module_rdp = prefs_register_protocol( proto_rdp, proto_reg_handoff_rdp);
 }
 
 void
 proto_reg_handoff_rdp(void)
 {
+	dissector_handle_t rdp_handle;
+
+	rdp_handle = find_dissector("rdp");
+	dissector_add_uint("tcp.port", TCP_PORT_RDP, rdp_handle);
 
 }
 
