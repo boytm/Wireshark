@@ -32,7 +32,8 @@
 #include <epan/packet.h>
 #include <epan/prefs.h>
 #include <epan/conversation.h>
-#include "packet-rdp.h"
+#include "packet-tcp.h"
+//#include "packet-rdp.h"
 
 #define TCP_PORT_RDP 3389
 
@@ -984,6 +985,7 @@ dissect_ts_security_header(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
             }
 		}
 	}
+    return -1;
 }
 
 guint32 parse_per_length(tvbuff_t *tvb, int *off)
@@ -1709,6 +1711,7 @@ gint ett_ts_primary_drawing_order = -1;
 gint ett_ts_primary_drawing_order_bounds = -1;
 gint ett_ts_alternate_secondary_drawing_order = -1;
 gint ett_ts_primary_drawing_order_coded_delta_list = -1;
+gint ett_ts_alternate_secondary_drawing_order_window = -1;
 
 static int 
 dissect_order_bounds(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
@@ -1936,7 +1939,7 @@ dissect_order_brush(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, gu
 gint hf_ts_order_binary_raster_operation = -1;
 gint hf_ts_order_ternary_raster_operation = -1;
 
-inline int 
+inline void 
 dissect_order_binary_raster_operation(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
     if (present & 1)
@@ -1946,7 +1949,7 @@ dissect_order_binary_raster_operation(tvbuff_t *tvb, packet_info *pinfo _U_ , pr
     }
 }
 
-inline int 
+inline void 
 dissect_order_ternary_raster_operation(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
     if (present & 1)
@@ -2020,7 +2023,7 @@ inline void dissect_order_cache_id_glyph(tvbuff_t *tvb, packet_info *pinfo _U_ ,
     }
 }
 
-inline int 
+inline void 
 dissect_order_cache_id(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
     if (present & 1)
@@ -2030,7 +2033,7 @@ dissect_order_cache_id(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree,
     }
 }
 
-inline int 
+inline void 
 dissect_order_cache_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present)
 {
     if (present & 1)
@@ -2132,7 +2135,7 @@ inline void parse_point(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree
 
 #define CEIL(x, y) (x / y + (x % y ? 1 : 0))
 
-static int dissect_order_delta_encoded_rectangles(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
+static void dissect_order_delta_encoded_rectangles(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
 {
     proto_item *item;
     proto_tree *coded_deta_list_tree;
@@ -2161,7 +2164,7 @@ static int dissect_order_delta_encoded_rectangles(tvbuff_t *tvb, packet_info *pi
     proto_item_set_len(item, offset - coded_deta_list_offset);
 }
 
-static int dissect_order_delta_encoded_points(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
+static void dissect_order_delta_encoded_points(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint8 delta_entries)
 {
     proto_item *item;
     proto_tree *coded_deta_list_tree;
@@ -2190,7 +2193,7 @@ static int dissect_order_delta_encoded_points(tvbuff_t *tvb, packet_info *pinfo 
     proto_item_set_len(item, offset - coded_deta_list_offset);
 }
 
-static int 
+static void 
 dissect_order_dstblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
@@ -2198,7 +2201,7 @@ dissect_order_dstblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, g
 }
 
 
-static int 
+static void 
 dissect_order_multi_dstblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     guint8 delta_entries = 0;
@@ -2220,7 +2223,7 @@ dissect_order_multi_dstblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
     }
 }
 
-static int 
+static void 
 dissect_order_patblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
@@ -2229,7 +2232,7 @@ dissect_order_patblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, g
     dissect_order_brush(tvb, pinfo, tree, present >> 7);
 }
 
-static int 
+static void 
 dissect_order_multi_patblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     guint8 delta_entries = 0;
@@ -2253,7 +2256,7 @@ dissect_order_multi_patblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
     }
 }
 
-static int 
+static void 
 dissect_order_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
@@ -2280,7 +2283,7 @@ dissect_order_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, gui
     }
 }
 
-static int 
+static void 
 dissect_order_multi_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     guint8 delta_entries = 0;
@@ -2322,7 +2325,7 @@ dissect_order_multi_rect(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tre
     }
 }
 
-static int 
+static void 
 dissect_order_srcblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     dissect_order_destination_rect(tvb, pinfo, tree, present, delta_coordinates);
@@ -2330,7 +2333,7 @@ dissect_order_srcblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, g
     dissect_order_src_coordinate(tvb, pinfo, tree, present >> 5, delta_coordinates);
 }
 
-static int 
+static void 
 dissect_order_multi_srcblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     guint8 delta_entries = 0;
@@ -2353,7 +2356,7 @@ dissect_order_multi_srcblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *t
     }
 }
 
-static int 
+static void 
 dissect_order_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     dissect_order_cache_id(tvb, pinfo, tree, present);
@@ -2363,7 +2366,7 @@ dissect_order_memblt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, g
     dissect_order_cache_index(tvb, pinfo, tree, present >> 8);
 }
 
-static int 
+static void 
 dissect_order_mem3blt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     dissect_order_cache_id(tvb, pinfo, tree, present);
@@ -2377,7 +2380,7 @@ dissect_order_mem3blt(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, 
 
 
 
-static int 
+static void 
 dissect_order_glyph_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     delta_coordinates = 0; // Notice: GlyphIndex no delta
@@ -2413,7 +2416,7 @@ dissect_order_glyph_index(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tr
 
 // a single glyph
 // FastGlyph same as FastIndex in structure, except X, Y are variable
-static int 
+static void 
 dissect_order_fast_glyph(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree, guint32 present, guint8 delta_coordinates)
 {
     dissect_order_cache_id_glyph(tvb, pinfo, tree, present);
@@ -2457,7 +2460,7 @@ gint hf_ts_order_altsec_offscreen_bitmap_cy = -1;
 gint hf_ts_order_altsec_offscreen_bitmap_num_indices = -1;
 gint hf_ts_order_altsec_offscreen_bitmap_indices = -1;
 
-static gint32
+static void
 dissect_order_altsec_create_offsrceen_bitmap(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
     guint16 flags;
@@ -2485,14 +2488,14 @@ dissect_order_altsec_create_offsrceen_bitmap(tvbuff_t *tvb, packet_info *pinfo _
 
 }
 
-static gint32
+static void
 dissect_order_altsec_switch_surface(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
     proto_tree_add_item(tree, hf_ts_order_bitmap_id, tvb, offset, 2, ENC_LITTLE_ENDIAN);
     offset += 2;
 }
 
-static gint32
+static void
 dissect_order_altsec_frame_marker(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
 {
     proto_tree_add_item(tree, hf_ts_order_altsec_frame_marker_action, tvb, offset, 4, ENC_LITTLE_ENDIAN);
@@ -2575,6 +2578,83 @@ dissect_order_altsec_stream_bitmap_next(tvbuff_t *tvb, packet_info *pinfo _U_ , 
 
     proto_tree_add_item(tree, hf_ts_order_altsec_bitmap_block, tvb, offset, bitmap_block_size, ENC_NA);
     offset += bitmap_block_size;
+}
+
+/* Window Order Header Flags */
+#define WINDOW_ORDER_TYPE_WINDOW            0x01000000
+#define WINDOW_ORDER_TYPE_NOTIFY            0x02000000
+#define WINDOW_ORDER_TYPE_DESKTOP           0x04000000
+#define WINDOW_ORDER_STATE_NEW              0x10000000
+#define WINDOW_ORDER_STATE_DELETED          0x20000000
+#define WINDOW_ORDER_FIELD_OWNER            0x00000002
+#define WINDOW_ORDER_FIELD_STYLE            0x00000008
+#define WINDOW_ORDER_FIELD_SHOW             0x00000010
+#define WINDOW_ORDER_FIELD_TITLE            0x00000004
+#define WINDOW_ORDER_FIELD_CLIENT_AREA_OFFSET       0x00004000
+#define WINDOW_ORDER_FIELD_CLIENT_AREA_SIZE     0x00010000
+#define WINDOW_ORDER_FIELD_RP_CONTENT           0x00020000
+#define WINDOW_ORDER_FIELD_ROOT_PARENT          0x00040000
+#define WINDOW_ORDER_FIELD_WND_OFFSET           0x00000800
+#define WINDOW_ORDER_FIELD_WND_CLIENT_DELTA     0x00008000
+#define WINDOW_ORDER_FIELD_WND_SIZE         0x00000400
+#define WINDOW_ORDER_FIELD_WND_RECTS            0x00000100
+#define WINDOW_ORDER_FIELD_VIS_OFFSET           0x00001000
+#define WINDOW_ORDER_FIELD_VISIBILITY           0x00000200
+#define WINDOW_ORDER_FIELD_ICON_BIG         0x00002000
+#define WINDOW_ORDER_ICON               0x40000000
+#define WINDOW_ORDER_CACHED_ICON            0x80000000
+#define WINDOW_ORDER_FIELD_NOTIFY_VERSION       0x00000008
+#define WINDOW_ORDER_FIELD_NOTIFY_TIP           0x00000001
+#define WINDOW_ORDER_FIELD_NOTIFY_INFO_TIP      0x00000002
+#define WINDOW_ORDER_FIELD_NOTIFY_STATE         0x00000004
+#define WINDOW_ORDER_FIELD_DESKTOP_NONE         0x00000001
+#define WINDOW_ORDER_FIELD_DESKTOP_HOOKED       0x00000002
+#define WINDOW_ORDER_FIELD_DESKTOP_ARC_COMPLETED    0x00000004
+#define WINDOW_ORDER_FIELD_DESKTOP_ARC_BEGAN        0x00000008
+#define WINDOW_ORDER_FIELD_DESKTOP_ZORDER       0x00000010
+#define WINDOW_ORDER_FIELD_DESKTOP_ACTIVE_WND       0x00000020
+
+/* Window Show States */
+#define WINDOW_HIDE                 0x00
+#define WINDOW_SHOW_MINIMIZED               0x02
+#define WINDOW_SHOW_MAXIMIZED               0x03
+#define WINDOW_SHOW                 0x05
+
+static const value_string alternate_secondary_drawing_order_window_types[] = {
+    { WINDOW_ORDER_TYPE_WINDOW, "Window Information" },
+    { WINDOW_ORDER_TYPE_NOTIFY, "Notification Icon Information" },
+    { WINDOW_ORDER_TYPE_DESKTOP, "Desktop Information" },
+	{ 0x0,	NULL }
+};
+
+gint hf_ts_order_altsec_window = -1;
+
+#define WINDOW_ORDER_TYPE_MASK (WINDOW_ORDER_TYPE_WINDOW | WINDOW_ORDER_TYPE_NOTIFY | WINDOW_ORDER_TYPE_DESKTOP)
+static void
+dissect_order_altsec_window(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_tree *tree)
+{
+    proto_item *window_item;
+    proto_tree *window_tree;
+
+    guint16 order_size;
+    guint32 field_flags;
+
+    gint window_order_offset = offset - 1;
+
+    order_size = tvb_get_letohs(tvb, offset);
+    offset += 2;
+    field_flags = tvb_get_letohl(tvb, offset);
+    offset += 4;
+
+    window_item = proto_tree_add_item(tree, hf_ts_order_altsec_window, tvb, window_order_offset, order_size, ENC_NA);
+    window_tree = proto_item_add_subtree(window_item, ett_ts_alternate_secondary_drawing_order_window);
+
+    proto_item_set_text(window_item, "%s", val_to_str(field_flags & WINDOW_ORDER_TYPE_MASK, alternate_secondary_drawing_order_window_types, "Unknown %d"));
+    // TODO: 
+    //if (field_flags & WINDOW_ORDER_TYPE_WINDOW)
+    //    else if (field_flags & WINDOW_ORDER_TYPE_NOTIFY)
+    //        else if (field_flags & WINDOW_ORDER_TYPE_DESKTOP)
+    offset = window_order_offset + order_size;
 }
 
 static void
@@ -2685,7 +2765,7 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
             }
 
             // primary order data
-            // TODO: 优先级最高的 memblt, opaque rect, glyph index
+            // TODO: 
             delta_coordinates = control_flags & TS_DELTA_COORDINATES;
             switch (state->order_type)
             {
@@ -2766,12 +2846,11 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
         {
             order_type = control_flags >> 2;
 
-            // TODO: frame marker, create offscreen bitmap, switch surface
-
             order_item = proto_tree_add_item(tree, hf_ts_alternate_secondary_drawing_order, tvb, order_offset, -1, ENC_NA);
             order_tree = proto_item_add_subtree(order_item, ett_ts_alternate_secondary_drawing_order);
             proto_item_set_text(order_item, "%s", val_to_str(order_type, alternate_secondary_drawing_order_types, "Unknown %d"));
 
+            // TODO: 
             switch (order_type)
             {
                 case TS_ALTSEC_SWITCH_SURFACE:
@@ -2792,6 +2871,10 @@ dissect_order_data(tvbuff_t *tvb, packet_info *pinfo _U_ , proto_item *item, gui
 
                 case TS_ALTSEC_STREAM_BITMAP_NEXT:
                     dissect_order_altsec_stream_bitmap_next(tvb, pinfo, order_tree);
+                    break;
+
+                case TS_ALTSEC_WINDOW:
+                    dissect_order_altsec_window(tvb, pinfo, order_tree);
                     break;
 
                 default:
@@ -3395,6 +3478,9 @@ proto_register_rdp(void)
         { &hf_ts_order_altsec_bitmap_block,
             { "BitmapBlock", "rdp.order_altsec_bitmap_block", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 
+        // order, altsec, window
+        { &hf_ts_order_altsec_window,
+            { "Windowing Alternate Secondary Drawing Order", "rdp.order_altsec_window", FT_NONE, BASE_NONE, NULL, 0x0, NULL, HFILL } },
 	};
 
 	static gint *ett[] = {
@@ -3415,6 +3501,7 @@ proto_register_rdp(void)
         &ett_ts_primary_drawing_order_bounds,
         &ett_ts_alternate_secondary_drawing_order,
         &ett_ts_primary_drawing_order_coded_delta_list,
+        &ett_ts_alternate_secondary_drawing_order_window,
 	};
 
     module_t *rdp_module;
